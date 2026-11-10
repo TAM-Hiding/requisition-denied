@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="ObjectDefinition" load_steps=2 format=3]
+[ext_resource type="Script" path="res://scripts/world/object_definition.gd" id="1"]
+[resource]
+script = ExtResource("1")
+object_id = &"RD-CRATE-001"
+display_name = "Storage crate"
+description = "A sealed industrial storage crate. Its shipping label reads: CONTENTS SUBJECT TO AUTHORIZATION."
+mass_kg = 35.0
+condition = "Sealed"
+available_actions = Array[StringName]([&"inspect"])
