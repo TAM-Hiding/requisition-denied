@@ -1,0 +1,19 @@
+# Godot 4 generated files
+.godot/
+
+# Exported builds
+/builds/
+/exports/
+
+# Python environments and secrets
+.venv/
+__pycache__/
+.env
+.env.*
+!.env.example
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+*~
