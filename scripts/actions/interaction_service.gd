@@ -17,10 +17,28 @@ func request(action: StringName, actor: Node3D, camera: Camera3D,
 		target: InteractableObject, reach: float, knowledge: PlayerKnowledge) -> Dictionary:
 	if not permitted(actor, camera, target, reach):
 		return {"ok": false, "message": "Object is no longer within reach or sight."}
-	if not target.query_actions().has(action) or action != &"inspect":
+	if not target.query_actions().has(action):
+		return {"ok": false, "message": "Action unavailable."}
+	if action in [&"pick_up", &"move"]:
+		if not actor is OtisController:
+			return {"ok": false, "message": "Actor has no equipment controller."}
+		if action == &"pick_up":
+			return actor.equipment.pick_up(target)
+		return actor.equipment.begin_move(target)
+	if action != &"inspect":
 		return {"ok": false, "message": "Action unavailable."}
 	if knowledge == null:
 		return {"ok": false, "message": "No actor knowledge state."}
 	var information := target.definition.inspection_information()
 	knowledge.record_inspection(target.definition.object_id, information)
 	return {"ok": true, "information": information}
+
+func request_equipment(action: StringName, actor: OtisController) -> Dictionary:
+	if not is_instance_valid(actor) or actor.equipment == null or not actor.controls_enabled:
+		return {"ok": false, "message": "Equipment unavailable."}
+	match action:
+		&"stow": return actor.equipment.stow()
+		&"equip_first": return actor.equipment.equip_first()
+		&"drop": return actor.equipment.drop()
+		&"stop_move": return actor.equipment.stop_move()
+	return {"ok": false, "message": "Action unavailable."}

@@ -6,12 +6,17 @@ extends CharacterBody3D
 @export var camera_fov: float = 75.0
 @export var interaction_distance: float = 3.0
 @export var gravity: float = 9.8
+@export var interact_hold_threshold: float = 0.35
+var equipment: EquipmentController
 var knowledge := PlayerKnowledge.new()
 var controls_enabled: bool = true
 @onready var camera: Camera3D = $Camera3D
 
 func _ready() -> void:
 	camera.fov = camera_fov
+	equipment = EquipmentController.new()
+	equipment.name = "Equipment"
+	add_child(equipment)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:

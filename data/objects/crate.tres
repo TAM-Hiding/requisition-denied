@@ -8,3 +8,4 @@ description = "A sealed industrial storage crate. Its shipping label reads: CONT
 mass_kg = 35.0
 condition = "Sealed"
 available_actions = Array[StringName]([&"inspect"])
+mobility = 1
