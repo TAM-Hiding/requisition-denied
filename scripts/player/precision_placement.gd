@@ -105,6 +105,8 @@ func update_preview(delta: float) -> void:
 	# The displayed pose still has to clear Otis before it can be released.
 	var mask := 3 if _clearance.clear(pose) else 1
 	pose = _clearance.slide(pose, displacement, mask)
+	if mask == 3 and not rotating and is_zero_approx(_angle):
+		pose = _clearance.accommodate_contact(pose, displacement)
 	for increment in 8:
 		if is_zero_approx(_angle):
 			break

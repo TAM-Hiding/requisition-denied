@@ -174,30 +174,55 @@ func run() -> void:
 	actor.camera.look_at(elevated)
 	await frames(12)
 	check(placement.begin(), "Enter placement for elevated surface")
-	placement.distance = actor.camera.global_position.distance_to(elevated)
-	await frames(40)
-	placement.rotate_from_mouse(20)
-	await frames(8)
-	var near_top := crate.global_position + Vector3.UP * 0.99
-	actor.camera.look_at(near_top)
-	placement.distance = actor.camera.global_position.distance_to(near_top)
-	await frames(35)
-	aim(actor, crate.global_position + Vector3.UP * 0.4 + Vector3.LEFT * 0.28)
-	await frames(35)
-	var contact := weight.global_position
-	check(placement.valid and contact.y > crate.global_position.y + 0.65, "Weight above obstructed crate target can be released")
-	aim(actor, crate.global_position + Vector3.UP * 0.4 + Vector3.RIGHT * 0.28)
-	var crate_clear := true
-	for step in 35:
-		await physics_frame
-		crate_clear = crate_clear and placement.valid
-	check(crate_clear, "Every crate-slide pose is release-safe")
-	check(weight.global_position.x > contact.x + 0.45 and absf(weight.global_position.y - contact.y) < 0.03,
-		"Weight slides horizontally across crate with a target inside it")
+	# A controlled initial tilt makes the response measurable independently
+	# of the equipment anchor's authored rotation.
+	var tilt := Basis(Vector3.BACK, deg_to_rad(35.0))
+	weight.global_transform = Transform3D(tilt, elevated)
+	aim(actor, elevated + Vector3.LEFT * 0.12)
+	await frames(28)
+	check(weight.global_basis.is_equal_approx(tilt), "Free translation preserves the tilted orientation")
+	placement.rotating = true
 	placement.cycle_axis()
-	placement.rotate_from_mouse(8)
-	await frames(8)
-	check(placement.valid, "Contact rotation retains a release-safe displayed pose")
+	placement.cycle_axis()
+	placement.rotate_from_mouse(-4)
+	await frames(4)
+	var manual_basis := weight.global_basis
+	check(not manual_basis.is_equal_approx(tilt), "Manual rotation still controls the held block")
+	aim(actor, crate.global_position + Vector3.UP * 0.4 + Vector3.LEFT * 0.28)
+	await frames(40)
+	var contact := weight.global_position
+	check(placement.valid and contact.y > crate.global_position.y + 0.65, "Tilted corner meets crate without penetration")
+	check(weight.global_basis.is_equal_approx(manual_basis), "Holding R suppresses contact response")
+	# Release R and continue applying pressure without changing the aim.
+	var before_contact := weight.global_basis
+	placement.rotating = false
+	await frames(6)
+	var early_turn := before_contact.get_rotation_quaternion().angle_to(weight.global_basis.get_rotation_quaternion())
+	check(early_turn > 0.003 and early_turn < 0.16, "Releasing R resumes progressive contact rotation")
+	var all_clear := true
+	for step in 150:
+		await physics_frame
+		all_clear = all_clear and placement.valid
+	check(all_clear, "Every accommodated pose remains clear")
+	check(weight.global_basis.y.dot(Vector3.UP) > 0.997, "Downward pressure brings the block's face toward the crate")
+	var settled_basis := weight.global_basis
+	var settled_height := weight.global_position.y
+	await frames(45)
+	check(weight.global_basis.is_equal_approx(settled_basis) and absf(weight.global_position.y - settled_height) < 0.002,
+		"Sustained pressure does not oscillate a settled face")
+	var slide_start := weight.global_position
+	aim(actor, slide_start + Vector3.RIGHT * 0.42)
+	await frames(35)
+	check(weight.global_position.x > slide_start.x + 0.36 and weight.global_basis.is_equal_approx(settled_basis),
+		"Parallel motion slides without spontaneous rotation")
+	var lift_start := weight.global_position
+	aim(actor, lift_start + Vector3.UP * 0.2)
+	await frames(30)
+	check(weight.global_position.y > lift_start.y + 0.17 and weight.global_basis.is_equal_approx(settled_basis),
+		"Aiming upward leaves contact without changing orientation")
+	aim(actor, crate.global_position + Vector3.UP * 0.45)
+	await frames(40)
+	check(placement.valid, "Accommodated block returns to a release-safe pose")
 	check(placement.confirm(), "Confirm collision-constrained placement above crate")
 	await frames(145)
 	check(weight.global_position.y > 1.3 and is_equal_approx(plate.measured_kg, 43), "Rotated weight settles on crate and totals 43 kg")
@@ -205,6 +230,22 @@ func run() -> void:
 	check(equipment.pick_up(weight).ok, "Remove the same calibration block")
 	await frames(6)
 	check(not plate.is_active() and is_equal_approx(plate.measured_kg, 35), "Removing weight releases signal")
+	actor.global_position = Vector3(4.55, 0.01, 3.65)
+	await frames(4)
+	aim(actor, Vector3(6.25, 1.65, 3.1))
+	await frames(12)
+	check(placement.begin(), "Enter placement for wall contact response")
+	aim(actor, Vector3(6.25, 1.65, 3.1))
+	var wall_tilt := Basis(Vector3.RIGHT, deg_to_rad(20.0)) * Basis(Vector3.BACK, deg_to_rad(25.0))
+	weight.global_transform = Transform3D(wall_tilt, Vector3(5.55, 1.65, 3.1))
+	var wall_clear_frames := true
+	for step in 140:
+		await physics_frame
+		wall_clear_frames = wall_clear_frames and placement.valid
+	check(wall_clear_frames and weight.global_position.x < 6.0, "Wall accommodation stays clear")
+	check(weight.global_basis.x.dot(Vector3.RIGHT) > 0.997 and weight.global_basis.y.dot(Vector3.UP) < 0.99,
+		"Pressure against the wall can settle a face while retaining tilt from world up")
+	placement.cancel()
 	if DisplayServer.get_name() != "headless":
 		await validate_graphical_input(actor, ui)
 	facility.queue_free()
