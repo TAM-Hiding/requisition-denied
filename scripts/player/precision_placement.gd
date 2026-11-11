@@ -18,8 +18,6 @@ var valid := false
 var _pressed_at := -1
 var _hold_consumed := false
 var _angle := 0.0
-var _rotation_blocked := false
-var _last_target := Vector3.INF
 var _clearance: PlacementClearance
 @onready var actor: OtisController = get_parent() as OtisController
 
@@ -70,8 +68,6 @@ func begin() -> bool:
 	axis = 0
 	rotating = false
 	_angle = 0
-	_rotation_blocked = false
-	_last_target = Vector3.INF
 	valid = false
 	return true
 
@@ -87,7 +83,6 @@ func cancel() -> void:
 func cycle_axis() -> void:
 	axis = (axis + 1) % AXES.size()
 	_angle = 0
-	_rotation_blocked = false
 
 func adjust_distance(steps: float) -> void:
 	distance = clampf(distance + steps * wheel_step, minimum_distance, maximum_distance)
@@ -105,19 +100,11 @@ func target_position() -> Vector3:
 func update_preview(delta: float) -> void:
 	var item := actor.equipment.held_item()
 	var pose := item.global_transform
-	var target := target_position()
-	if not _last_target.is_equal_approx(target):
-		_rotation_blocked = false
-	_last_target = target
-	# If Otis walks into the preview, let it escape along a clear world route.
-	# Validation still includes Otis at the proposed and displayed poses.
+	var displacement := (target_position() - pose.origin) * (1.0 - exp(-follow_speed * delta))
+	# Let a preview that Otis has walked into escape along a clear world route.
+	# The displayed pose still has to clear Otis before it can be released.
 	var mask := 3 if _clearance.clear(pose) else 1
-	var fraction := _clearance.travel_fraction(pose, target, mask)
-	var wanted := pose.origin.lerp(target, 1.0 - exp(-follow_speed * delta))
-	var reachable := pose.origin.lerp(target, fraction)
-	pose.origin = pose.origin.move_toward(wanted, pose.origin.distance_to(reachable))
-	if not _clearance.clear(pose, mask):
-		pose.origin = item.global_position
+	pose = _clearance.slide(pose, displacement, mask)
 	for increment in 8:
 		if is_zero_approx(_angle):
 			break
@@ -126,25 +113,19 @@ func update_preview(delta: float) -> void:
 		var candidate := pose
 		var orientation := pose.basis.orthonormalized() * Basis(AXES[axis], step)
 		candidate.basis = orientation.orthonormalized() * Basis.from_scale(pose.basis.get_scale())
-		_rotation_blocked = not _clearance.rotation_clear(pose, candidate, step)
-		if _rotation_blocked:
+		if not _clearance.rotation_clear(pose, candidate, step):
 			_angle = 0
 			break
 		pose = candidate
 	item.global_transform = pose
-	valid = candidate_is_valid(pose)
-
-func candidate_is_valid(pose: Transform3D) -> bool:
-	var target := Transform3D(pose.basis, target_position())
-	return not _rotation_blocked and _clearance.clear(pose) and _clearance.clear(target) \
-		and _clearance.travel_fraction(pose, target.origin) >= 1.0
+	valid = _clearance.clear(pose)
 
 func confirm() -> bool:
 	var item := actor.equipment.held_item()
 	if not is_active() or item == null:
 		return false
 	# Recheck current geometry at the input event, including moving barriers.
-	if not candidate_is_valid(item.global_transform):
+	if not _clearance.clear(item.global_transform):
 		valid = false
 		actor.equipment.result(false, "Placement blocked.")
 		return false

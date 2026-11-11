@@ -80,18 +80,42 @@ func run() -> void:
 	check(placement.distance == placement.minimum_distance, "Wheel clamps minimum distance")
 	placement.distance = 1.35
 	actor.global_position = Vector3(-5.45, 0.01, 3.0)
-	actor.camera.look_at(actor.camera.global_position + Vector3.LEFT)
+	wrench.global_transform = Transform3D(Basis.IDENTITY, Vector3(-5.7, 1.65, 2.55))
+	aim(actor, Vector3(-6.8, 1.65, 2.55))
 	await frames(35)
-	check(not placement.valid and wrench.global_position.x > -6.0, "Wall blocks target and swept preview stays on near side")
+	check(placement.valid and wrench.global_position.x > -6.0, "Wall-constrained displayed pose is clear")
+	var wall_start := wrench.global_position
+	var wall_target := placement.target_position() + Vector3.BACK * 1.1
+	aim(actor, wall_target)
+	var wall_clear := true
+	for step in 32:
+		await physics_frame
+		wall_clear = wall_clear and placement.valid
+	check(wrench.global_position.z > wall_start.z + 0.8 and absf(wrench.global_position.x - wall_start.x) < 0.04,
+		"Wall contact preserves tangential travel")
+	check(wall_clear and wrench.collision_mask == 0, "Every wall-slide pose is clear and the preview mask is restored")
+	var valid_pose := wrench.global_transform
+	wrench.global_position = Vector3(-6.1, 1.65, 3)
 	tap(placement)
-	check(placement.is_active() and equipment.held_item() == wrench, "Invalid confirmation retains possession")
-	actor.global_position = Vector3(0, 0.01, 4)
-	actor.camera.look_at(actor.camera.global_position + Vector3.FORWARD)
+	check(placement.is_active() and equipment.held_item() == wrench, "Actually overlapping wall pose cannot be confirmed")
+	wrench.global_transform = valid_pose
+	actor.global_position = Vector3(-5.2, 0.01, 5.1)
+	await frames(3)
+	wrench.global_transform = Transform3D(Basis.IDENTITY, Vector3(-5.7, 1.6, 5.7))
+	aim(actor, Vector3(-6.45, 1.1, 6.45))
 	await frames(40)
-	placement.minimum_distance = 0.02
-	placement.adjust_distance(-100)
-	await frames(20)
-	check(not placement.valid and not placement.confirm(), "Placement inside Otis is rejected")
+	var corner := wrench.global_position
+	check(corner.x > -6 and corner.x < -5.85 and corner.z < 6 and corner.z > 5.7
+		and absf(corner.y - 1.1) < 0.035 and placement.valid, "Two-plane corner clips both inward components and allows vertical travel")
+	var departure := Vector3(-5.5, 1.1, 5.5)
+	aim(actor, departure)
+	placement.update_preview(1.0 / 60.0)
+	var expected_departure := corner.lerp(departure, 1.0 - exp(-placement.follow_speed / 60.0))
+	check(wrench.global_position.distance_to(expected_departure) < 0.005, "Corner departure resumes smoothed motion immediately")
+	var outside_actor := wrench.global_transform
+	wrench.global_position = actor.global_position + Vector3.UP
+	check(not placement.confirm() and not placement.valid, "Actually overlapping Otis cannot be confirmed")
+	wrench.global_transform = outside_actor
 	placement.minimum_distance = 0.45
 	actor.global_position = Vector3(4.5, 0.01, 3.8)
 	actor.camera.look_at(actor.camera.global_position + Vector3.RIGHT)
@@ -103,15 +127,22 @@ func run() -> void:
 	placement.cycle_axis()
 	placement.rotate_from_mouse(175)
 	await frames(15)
-	check(not placement.valid and not placement.confirm() and wrench.global_position.x < 6.0,
-		"Rotational sweep stops wide end before wall")
+	check(placement.valid and wrench.global_position.x < 6.0
+		and absf(wrench.global_basis.z.x) < 0.99, "Wall stops unsafe rotation while the displayed pose stays clear")
+	var stopped_basis := wrench.global_basis
+	placement.rotate_from_mouse(-15)
+	await frames(7)
+	check(not wrench.global_basis.is_equal_approx(stopped_basis) and placement.valid, "Reverse rotation can leave wall contact")
 	var crate := facility.get_node("Crate") as InteractableObject
 	actor.global_position = crate.global_position + Vector3(0, -0.64, 1.8)
 	await frames(3)
 	actor.camera.look_at(crate.global_position)
 	placement.distance = actor.camera.global_position.distance_to(crate.global_position)
 	await frames(30)
-	check(not placement.valid and not placement.confirm(), "Placement inside crate is rejected")
+	var safe_pose := wrench.global_transform
+	wrench.global_position = crate.global_position
+	check(not placement.confirm(), "Actually overlapping crate cannot be confirmed")
+	wrench.global_transform = safe_pose
 	placement.cancel()
 	check(not placement.is_active() and equipment.presentation.item == wrench and not wrench.top_level, "Cancel restores ordinary equipped presentation")
 	check(wrench.get_instance_id() == id and equipment.held_item() == wrench, "Cancel preserves identity and ownership")
@@ -151,7 +182,23 @@ func run() -> void:
 	actor.camera.look_at(near_top)
 	placement.distance = actor.camera.global_position.distance_to(near_top)
 	await frames(35)
-	check(placement.valid and placement.confirm(), "Rotate and release above crate")
+	aim(actor, crate.global_position + Vector3.UP * 0.4 + Vector3.LEFT * 0.28)
+	await frames(35)
+	var contact := weight.global_position
+	check(placement.valid and contact.y > crate.global_position.y + 0.65, "Weight above obstructed crate target can be released")
+	aim(actor, crate.global_position + Vector3.UP * 0.4 + Vector3.RIGHT * 0.28)
+	var crate_clear := true
+	for step in 35:
+		await physics_frame
+		crate_clear = crate_clear and placement.valid
+	check(crate_clear, "Every crate-slide pose is release-safe")
+	check(weight.global_position.x > contact.x + 0.45 and absf(weight.global_position.y - contact.y) < 0.03,
+		"Weight slides horizontally across crate with a target inside it")
+	placement.cycle_axis()
+	placement.rotate_from_mouse(8)
+	await frames(8)
+	check(placement.valid, "Contact rotation retains a release-safe displayed pose")
+	check(placement.confirm(), "Confirm collision-constrained placement above crate")
 	await frames(145)
 	check(weight.global_position.y > 1.3 and is_equal_approx(plate.measured_kg, 43), "Rotated weight settles on crate and totals 43 kg")
 	check(plate.is_active() and facility.barrier.state == PoweredBarrier.State.OPEN, "Sustained stack opens gate")
@@ -164,6 +211,10 @@ func run() -> void:
 	await process_frame
 	print("RD-004: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures else 0)
+
+func aim(actor: OtisController, target: Vector3) -> void:
+	actor.camera.look_at(target)
+	actor.placement.distance = actor.camera.global_position.distance_to(target)
 
 func validate_graphical_input(actor: OtisController, ui: CanvasLayer) -> void:
 	actor.global_position = Vector3(0, 0.01, 4)
