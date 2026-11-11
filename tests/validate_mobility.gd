@@ -173,6 +173,7 @@ func run() -> void:
 			await RenderingServer.frame_post_draw
 			root.get_texture().get_image().save_png(OS.get_environment("RD_SCREENSHOT"))
 		input_action(&"drop_item", true)
+		input_action(&"drop_item", false)
 		check(wrench.state == InteractableObject.State.WORLD, "G drops through input")
 		# Use actual controller follow goal and autorelease safeguards.
 		manipulation.process_mode = Node.PROCESS_MODE_INHERIT
