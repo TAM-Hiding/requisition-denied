@@ -179,11 +179,15 @@ func accommodate_contact(pose: Transform3D, displacement: Vector3) -> Transform3
 			candidate.origin += normal * lift
 			if rotation_clear(lifted, candidate, angle):
 				var approach := minf(pressure, shift.length() + 0.002)
-				var settled := sweep_translation(candidate, -normal * (lift + approach))
-				var advance := -(settled.origin - pose.origin).dot(normal)
-				# A step must let the reference advance under the applied
-				# pressure. A settled face cannot rock back and forth.
-				if advance > MIN_CONTACT_PROGRESS and advance <= pressure + MOTION_EPSILON:
+				var inward := -normal * (lift + approach)
+				# Measure both orientations using the same sweep. The displayed
+				# pose comes from body motion, which uses a different backoff.
+				var baseline := sweep_translation(lifted, inward)
+				var settled := sweep_translation(candidate, inward)
+				var gain := (baseline.origin - settled.origin).dot(normal)
+				var advance := (pose.origin - settled.origin).dot(normal)
+				if (gain > MIN_CONTACT_PROGRESS and advance >= -RELEASE_MARGIN
+						and advance <= pressure + MOTION_EPSILON):
 					return settled
 		angle *= 0.5
 	return pose
