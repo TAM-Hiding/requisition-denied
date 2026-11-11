@@ -5,6 +5,9 @@ const PLATE_WIDTH := 2.1
 var load_plate: PhysicalLoadSensor
 var barrier: PoweredBarrier
 var barrier_control: BarrierController
+var administration: AdministrativeSession
+var terminal_session: TerminalInteraction
+var _barrier_was_blocked := false
 
 
 func _ready() -> void:
@@ -57,11 +60,19 @@ func _ready() -> void:
 	box(wrench, "JawLeft", Vector3(0.035, 0.05, 0.11), Vector3(-0.0375, 0, -0.11), steel)
 	box(wrench, "JawRight", Vector3(0.035, 0.05, 0.11), Vector3(0.0375, 0, -0.11), steel)
 	box(wrench, "JawBridge", Vector3(0.11, 0.05, 0.035), Vector3(0, 0, -0.05), steel)
-	var terminal := make_object("terminal", Vector3(0, 1.6, -5.8), Vector3(1.2, 1.1, 0.4), dark)
-	box(terminal, "Screen", Vector3(1, 0.65, 0.03), Vector3(0, 0.1, 0.22), glow)
-	box(terminal, "Keyboard", Vector3(1, 0.1, 0.3), Vector3(0, -0.45, 0.28), wall_mat)
+	administration = AdministrativeSession.new()
+	add_child(administration)
+	var terminal := TerminalWorkstation.new()
+	terminal.name = "Terminal"
+	terminal.definition = preload("res://data/objects/terminal.tres")
+	terminal.position = Vector3(0, 1.6, -5.8)
+	add_child(terminal)
+	terminal_session = TerminalInteraction.new()
+	terminal_session.name = "TerminalInteraction"
+	add_child(terminal_session)
+	terminal_session.configure($Otis, terminal, administration, terminal.screen, terminal.view_anchor, terminal.display)
+	terminal_session.active_changed.connect($InteractionUI.set_terminal_active)
 	label_at(self, "RD / 001   •   SYSTEMS TEST CHAMBER", Vector3(0, 3.05, -5.96), 42)
-	label_at(terminal, "SERVICES\nUNAVAILABLE", Vector3(0, 0.1, 0.245), 24, Color("173a3b"))
 	label_at(generator, "AUX / 01", Vector3(0.45, 0.25, 0.665), 22)
 	label_at(crate, "STORAGE\n001", Vector3(0, 0, 0.66), 26)
 	build_load_station(floor as StaticBody3D, dark, amber, steel)
@@ -128,8 +139,17 @@ func build_load_station(floor: StaticBody3D, dark: Material, amber: Material, st
 	barrier_control.actuator = barrier
 	barrier_control.inputs = [load_plate.output]
 	add_child(barrier_control)
-	barrier.state_changed.connect(func(_state: PoweredBarrier.State) -> void:
-		log_environment("%s %s" % [barrier.barrier_id, barrier.state_name()]))
+	barrier.state_changed.connect(_barrier_changed)
+
+func _barrier_changed(state: PoweredBarrier.State) -> void:
+	log_environment("%s %s" % [barrier.barrier_id, barrier.state_name()])
+	var blocked := state == PoweredBarrier.State.BLOCKED
+	if blocked == _barrier_was_blocked:
+		return
+	_barrier_was_blocked = blocked
+	administration.publish_event(&"BARRIER_OBSTRUCTED" if blocked else &"BARRIER_RESTORED",
+		barrier.barrier_id, {"state": barrier.state_name()})
+
 
 func add_shape(body: CollisionObject3D, size: Vector3, at: Vector3) -> void:
 	var collider := CollisionShape3D.new()

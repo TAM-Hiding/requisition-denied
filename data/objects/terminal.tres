@@ -3,8 +3,8 @@
 [resource]
 script = ExtResource("1")
 object_id = &"RD-TERM-001"
-display_name = "Wall terminal"
-description = "A wall-mounted facility terminal. Its standby screen reads: REQUISITION SERVICES UNAVAILABLE."
-mass_kg = 12.0
-condition = "Standby"
-available_actions = Array[StringName]([&"inspect", &"access_records"])
+display_name = "Administrative workstation"
+description = "A desk-mounted Facility workstation with a CRT display and a physical keyboard."
+mass_kg = 78.0
+condition = "Operational"
+available_actions = Array[StringName]([&"inspect", &"use_terminal"])

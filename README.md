@@ -25,11 +25,11 @@ godot --path .
 | --- | --- |
 | WASD | Walk |
 | Mouse | Look |
-| E tap | Open context menu within 3 m; release active crate manipulation |
+| E tap | Use the workstation or open an object context menu within 3 m. Release an active crate manipulation. |
 | Left click | Select a menu action; recapture mouse when no menu is open |
-| Escape | Close the menu and resume; otherwise release mouse |
+| Escape | Close the terminal or context menu and resume. During placement, cancel. Otherwise, release the mouse. |
 | Hold E (0.35 s) | Stow the held item; never also triggers a tap |
-| G | Drop held item; release environmental manipulation |
+| G tap / hold | Tap to drop or confirm placement. Hold to enter precision placement. Releases active environmental manipulation. |
 | 1 | Retrieve the first stored item into the active slot |
 | F3 | Toggle developer diagnostics |
 
@@ -37,6 +37,20 @@ Movement is suspended while a menu is open or the mouse is released. The menu
 supports keyboard navigation with Tab / arrow keys and Enter. Inspect records
 only the displayed name and description; repeated identical observations do not
 create duplicate entries. Restarting the session clears knowledge.
+
+## Administrative workstation
+
+Approach the desk under the Facility sign and tap **E** while looking at the CRT.
+Use the mouse or **Tab**, arrow keys, and **Enter** to navigate. **Escape** returns
+to first person. The camera moves to the display while Otis stays in place and
+world physics continues.
+
+- **Messages** shows authored notices and tracks read state.
+- **Requisitions** records deterministic decisions for the current session.
+  Approvals do not deliver equipment or change access.
+- **Inventory** displays Otis's equipped item, stored items, and storage capacity.
+- **Records** displays what Otis has learned through inspection.
+- **Settings** controls CRT text brightness for the current session.
 
 ## Structure
 
@@ -48,7 +62,8 @@ create duplicate entries. Restarting the session clears knowledge.
 - `scripts/knowledge/player_knowledge.gd`: per-actor learned snapshots, independent of world Resources.
 - `scripts/player/`: locomotion, equipment owner, independent environmental manipulation,
   and held-item occupancy/presentation profiles with independent NORMAL/LOWERED poses.
-- `scripts/ui/`: shared contextual menu, targeting hint, diagnostics.
+- `scripts/ui/`: contextual HUD, terminal camera and input ownership, and the in-world terminal display.
+- `scripts/administration/`: Facility-owned messages, requisition records and administrative events.
 - `tests/`: engine-level validation and startup smoke test.
 
 World state does not contain an `inspected` flag: inspection state belongs to
@@ -60,9 +75,9 @@ To add an interactable, create an `ObjectDefinition` Resource with a stable,
 unique ID, attach it to an `InteractableObject` body, and supply collision and
 visual children. `properties` permits future world attributes. Resource action
 IDs drive the shared menu. `inspect`, `pick_up` and `move` execute through the
-service. Manipulation actions are derived from current instance mobility/state; other IDs remain
-explicitly disabled placeholders. New executable actions belong in the service,
-which revalidates line of sight, range and availability at execution time.
+service. The workstation's `use_terminal` action transfers camera and input
+ownership after the same range and sight check. Manipulation actions are
+derived from current instance mobility and state.
 
 Otis's scene exposes movement speed, acceleration, mouse sensitivity, FOV,
 gravity, interaction reach and the E hold threshold. Rendering uses Compatibility mode for a modest
@@ -84,6 +99,7 @@ For graphical validation, run the suite without `--headless`:
 godot --path . --script tests/validate_facility.gd
 godot --path . --script tests/validate_mobility.gd
 godot --path . --script tests/validate_manipulation_followup.gd
+godot --path . --script tests/validate_terminal.gd
 ```
 
 Graphical validation additionally checks captured mouse state, movement and
