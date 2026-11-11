@@ -39,7 +39,7 @@ func is_target(object: InteractableObject) -> bool:
 
 func enter() -> bool:
 	if (active or not _otis.controls_enabled or _otis.placement.is_active()
-			or _otis.manipulation.moving_object() != null):
+			or _otis.controls_world_object()):
 		return false
 	if (not _service.permitted(_otis, _otis.camera, _target, _otis.interaction_distance)
 			or not _target.query_actions().has(&"use_terminal")):

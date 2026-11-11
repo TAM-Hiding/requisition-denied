@@ -31,7 +31,7 @@ func result(ok: bool, message: String) -> Dictionary:
 func begin_move(item: InteractableObject) -> Dictionary:
 	if not is_instance_valid(item) or item.mobility() != ObjectDefinition.Mobility.MOVABLE or item.state != InteractableObject.State.WORLD:
 		return result(false, "That object cannot be moved.")
-	if _moving != null:
+	if actor.controls_world_object() or actor.placement.is_active():
 		return result(false, "Release the current object first.")
 	_minimum_separation = horizontal_radius(actor) + horizontal_radius(item) + separation_margin
 	var displacement := item.global_position - actor.global_position

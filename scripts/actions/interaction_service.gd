@@ -19,9 +19,13 @@ func request(action: StringName, actor: Node3D, camera: Camera3D,
 		return {"ok": false, "message": "Object is no longer within reach or sight."}
 	if not target.query_actions().has(action):
 		return {"ok": false, "message": "Action unavailable."}
-	if action in [&"pick_up", &"move"]:
+	if action in [&"pick_up", &"move", &"lift"]:
 		if not actor is OtisController:
 			return {"ok": false, "message": "Actor has no equipment controller."}
+		if action == &"lift":
+			return actor.carry.lift(target)
+		if is_instance_valid(actor.carry.item):
+			return {"ok": false, "message": "Release the carried object first."}
 		if action == &"pick_up":
 			return actor.equipment.pick_up(target)
 		return actor.manipulation.begin_move(target)
@@ -36,6 +40,10 @@ func request(action: StringName, actor: Node3D, camera: Camera3D,
 func request_actor_action(action: StringName, actor: OtisController) -> Dictionary:
 	if not is_instance_valid(actor) or actor.equipment == null or not actor.controls_enabled:
 		return {"ok": false, "message": "Equipment unavailable."}
+	if is_instance_valid(actor.carry.item):
+		if action == &"stop_move":
+			return actor.carry.release()
+		return {"ok": false, "message": "Release the carried object first."}
 	match action:
 		&"stow": return actor.equipment.stow()
 		&"equip_first": return actor.equipment.equip_first()

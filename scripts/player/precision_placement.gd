@@ -55,7 +55,7 @@ func clear_gesture() -> void:
 
 func begin() -> bool:
 	var item := actor.equipment.held_item()
-	if item == null or is_active() or actor.manipulation.moving_object() != null:
+	if item == null or is_active() or actor.controls_world_object():
 		return false
 	var clearance := PlacementClearance.new()
 	if not clearance.configure(item) or not clearance.clear(item.global_transform, 1):

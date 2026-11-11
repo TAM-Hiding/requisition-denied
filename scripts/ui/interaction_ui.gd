@@ -28,7 +28,7 @@ func _ready() -> void:
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(hud)
 	var heading := Label.new()
-	heading.text = "REQUISITION DENIED   /   RD–005"
+	heading.text = "REQUISITION DENIED   /   RD–006"
 	heading.position = Vector2(24, 18)
 	hud.add_child(heading)
 	help = Label.new()
@@ -88,6 +88,7 @@ func _ready() -> void:
 	hud.add_child(status)
 	otis.equipment.feedback.connect(show_feedback)
 	otis.manipulation.feedback.connect(show_feedback)
+	otis.carry.feedback.connect(show_feedback)
 	panel.hide()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
@@ -129,8 +130,8 @@ func _physics_process(delta: float) -> void:
 		var placement := otis.placement
 		prompt.text = "PLACEMENT  |  ROTATION %s  |  %s" % [
 			PrecisionPlacement.AXIS_NAMES[placement.axis], "CLEAR" if placement.valid else "BLOCKED"]
-	elif otis.manipulation.moving_object() != null:
-		prompt.text = "[E] Release object"
+	elif otis.controls_world_object():
+		prompt.text = "[E / G] Release carried object" if is_instance_valid(otis.carry.item) else "[E] Release object"
 	elif target != null:
 		prompt.text = "[E]  " + target.definition.display_name
 	else:
@@ -151,10 +152,11 @@ func _physics_process(delta: float) -> void:
 		target.mobility_name() if target != null else "—",
 		target.state_name() if target != null else "—",
 		held.definition.object_id if held != null else &"none",
-		otis.equipment.stored_items().size(), str(otis.manipulation.moving_object() != null)]
+		otis.equipment.stored_items().size(), str(otis.controls_world_object())]
 	debug_label.text += "\nEQUIPMENT STATE  " + ("HELD" if held != null else ("STOWED" if not otis.equipment.stored_items().is_empty() else "EMPTY"))
 
-	debug_label.text += "\nHELD OBSTRUCTED  %s\nMOVEMENT LIMIT  %.2f m/s" % [str(otis.equipment.presentation.obstructed), otis.manipulation.effective_speed(otis.movement_speed)]
+	debug_label.text += "\nHELD OBSTRUCTED  %s\nMOVEMENT LIMIT  %.2f m/s" % [
+		str(otis.equipment.presentation.obstructed), otis.manipulation.effective_speed(otis.movement_speed) * otis.carry.speed_factor()]
 
 	debug_label.text += "\nEQUIPMENT POSE  " + HeldItemPresentation.Pose.keys()[otis.equipment.presentation.requested_pose]
 
@@ -184,13 +186,13 @@ func _input(event: InputEvent) -> void:
 		elif menu_open:
 			close_menu()
 		else:
-			if otis.manipulation.moving_object() != null:
+			if otis.controls_world_object():
 				service.request_actor_action(&"stop_move", otis)
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("drop_item") and gameplay_input_allowed():
 		cancel_hold()
-		if otis.manipulation.moving_object() != null:
+		if otis.controls_world_object():
 			service.request_actor_action(&"stop_move", otis)
 		else:
 			otis.placement.press_drop()
@@ -210,7 +212,7 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 	elif event.is_action_released("interact"):
 		if e_pending and not e_consumed and gameplay_input_allowed():
-			if otis.manipulation.moving_object() != null:
+			if otis.controls_world_object():
 				service.request_actor_action(&"stop_move", otis)
 			elif not (terminal.is_target(target) and terminal.enter()):
 				open_menu(target)
@@ -264,7 +266,8 @@ func advance_hold(delta: float) -> void:
 	e_elapsed += delta
 	if e_elapsed >= otis.interact_hold_threshold:
 		e_consumed = true
-		service.request_actor_action(&"stow", otis)
+		if not is_instance_valid(otis.carry.item):
+			service.request_actor_action(&"stow", otis)
 
 func show_feedback(message: String) -> void:
 	status.text = message
@@ -292,7 +295,7 @@ func rebuild_actions() -> void:
 		var button := Button.new()
 		button.text = String(action).replace("_", " ").capitalize()
 		var use_terminal: bool = action == &"use_terminal" and get_parent().terminal_session.is_target(menu_target)
-		button.disabled = action not in [&"inspect", &"pick_up", &"move"] and not use_terminal
+		button.disabled = action not in [&"inspect", &"pick_up", &"move", &"lift"] and not use_terminal
 		if button.disabled:
 			button.text += " — unavailable in RD-002"
 		button.pressed.connect(perform_action.bind(action))
@@ -327,6 +330,9 @@ func _notification(what: int) -> void:
 			otis.placement.clear_gesture()
 			otis.placement.rotating = false
 		cancel_hold()
-		if is_instance_valid(otis) and otis.equipment != null and otis.manipulation.moving_object() != null:
-			otis.manipulation.stop_move()
+		if is_instance_valid(otis) and otis.equipment != null and otis.controls_world_object():
+			if is_instance_valid(otis.carry.item):
+				otis.carry.release()
+			else:
+				otis.manipulation.stop_move()
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE

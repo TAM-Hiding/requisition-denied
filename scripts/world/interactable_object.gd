@@ -1,9 +1,10 @@
 class_name InteractableObject
 extends RigidBody3D
 ## Runtime body. Definitions describe the object; state belongs to this instance.
-enum State { WORLD, HELD, STOWED, MOVING }
+enum State { WORLD, HELD, STOWED, MOVING, CARRIED }
 @export var definition: ObjectDefinition
 var state: State = State.WORLD
+var support_carrier: CharacterBody3D
 var _mobility_override: int = -1
 var move_goal: Vector3
 var move_velocity: Vector3
@@ -47,13 +48,14 @@ func query_actions() -> Array[StringName]:
 		return actions
 	# Manipulation actions are derived, never trusted from static definition lists.
 	for action in definition.available_actions:
-		if action not in [&"pick_up", &"move", &"stow"]:
+		if action not in [&"pick_up", &"move", &"stow", &"lift"]:
 			actions.append(action)
 	if state == State.WORLD:
 		if mobility() == ObjectDefinition.Mobility.CARRYABLE:
 			actions.append(&"pick_up")
 		elif mobility() == ObjectDefinition.Mobility.MOVABLE:
 			actions.append(&"move")
+			actions.append(&"lift")
 	return actions
 
 func _integrate_forces(body: PhysicsDirectBodyState3D) -> void:

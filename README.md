@@ -25,11 +25,11 @@ godot --path .
 | --- | --- |
 | WASD | Walk |
 | Mouse | Look |
-| E tap | Use the workstation or open an object context menu within 3 m. Release an active crate manipulation. |
+| E tap | Use the workstation or open an object context menu within 3 m. Release an active carry or crate manipulation. |
 | Left click | Select a menu action; recapture mouse when no menu is open |
-| Escape | Close the terminal or context menu and resume. During placement, cancel. Otherwise, release the mouse. |
+| Escape | Close the terminal or context menu and resume. During placement, cancel. Release a carried load before releasing the mouse. |
 | Hold E (0.35 s) | Stow the held item; never also triggers a tap |
-| G tap / hold | Tap to drop or confirm placement. Hold to enter precision placement. Releases active environmental manipulation. |
+| G tap / hold | Tap to drop or confirm placement. Hold to enter precision placement. Releases an active carry or environmental manipulation. |
 | 1 | Retrieve the first stored item into the active slot |
 | F3 | Toggle developer diagnostics |
 
@@ -48,9 +48,21 @@ world physics continues.
 - **Messages** shows authored notices and tracks read state.
 - **Requisitions** records deterministic decisions for the current session.
   Approvals do not deliver equipment or change access.
-- **Inventory** displays Otis's equipped item, stored items, and storage capacity.
+- **Inventory** displays equipment, storage capacity, and Otis's chassis diagnostics.
 - **Records** displays what Otis has learned through inspection.
 - **Settings** controls CRT text brightness for the current session.
+
+## Chassis and carrying
+
+Each Facility session generates Otis's physical capabilities within manufacturing
+tolerances. See **Inventory → Unit Diagnostics** at the workstation for maximum
+lift, walking speed, acceleration, and chassis mass.
+
+Look at the storage crate, tap **E**, and select **Lift**. The crate stays
+in the world and follows Otis with swept collision checks. Tap **E**, **G**, or
+**Escape** to release it. **Move** still pushes or drags an object, regardless
+of whether Otis can lift it. The pressure plate measures a carried load through
+Otis's contact with the floor.
 
 ## Structure
 
@@ -60,8 +72,8 @@ world physics continues.
 - `data/objects/`: crate, generator, terminal and wrench definitions and their action lists.
 - `scripts/actions/interaction_service.gd`: action permission and execution gate.
 - `scripts/knowledge/player_knowledge.gd`: per-actor learned snapshots, independent of world Resources.
-- `scripts/player/`: locomotion, equipment owner, independent environmental manipulation,
-  and held-item occupancy/presentation profiles with independent NORMAL/LOWERED poses.
+- `scripts/player/`: chassis, locomotion, equipment, large-object carry, push and drag,
+  and the NORMAL/LOWERED presentation poses for handheld items.
 - `scripts/ui/`: contextual HUD, terminal camera and input ownership, and the in-world terminal display.
 - `scripts/administration/`: Facility-owned messages, requisition records and administrative events.
 - `tests/`: engine-level validation and startup smoke test.
@@ -74,13 +86,13 @@ for the same object without increasing the inspected-object count.
 To add an interactable, create an `ObjectDefinition` Resource with a stable,
 unique ID, attach it to an `InteractableObject` body, and supply collision and
 visual children. `properties` permits future world attributes. Resource action
-IDs drive the shared menu. `inspect`, `pick_up` and `move` execute through the
+IDs drive the shared menu. `inspect`, `pick_up`, `lift` and `move` execute through the
 service. The workstation's `use_terminal` action transfers camera and input
 ownership after the same range and sight check. Manipulation actions are
 derived from current instance mobility and state.
 
-Otis's scene exposes movement speed, acceleration, mouse sensitivity, FOV,
-gravity, interaction reach and the E hold threshold. Rendering uses Compatibility mode for a modest
+The chassis supplies walking speed and acceleration. Otis's scene exposes mouse
+sensitivity, FOV, gravity, interaction reach, and the E hold threshold. Rendering uses Compatibility mode for a modest
 hardware baseline; lighting is deliberately simple.
 
 ## Validation

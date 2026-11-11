@@ -136,7 +136,7 @@ func run() -> void:
 	check(otis.manipulation.effective_speed(otis.movement_speed) < crate.move_speed, "Manipulation speed leaves tracking headroom")
 	check(otis.manipulation.minimum_separation() > 0.95, "Separation accounts for both collision bodies")
 	check(otis.manipulation.stop_move().ok and otis.equipment.held_item() == wrench, "Release preserves equipped item")
-	check(is_equal_approx(otis.manipulation.effective_speed(otis.movement_speed), 4), "Normal speed returns after release")
+	check(is_equal_approx(otis.manipulation.effective_speed(otis.movement_speed), otis.movement_speed), "Normal speed returns after release")
 	if DisplayServer.get_name() != "headless":
 		await pushing_regression(crate)
 		# Save the close-wall view after the motion test, before teardown.
