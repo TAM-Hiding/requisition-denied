@@ -1,5 +1,6 @@
 extends CanvasLayer
 var service := InteractionService.new()
+var hud: Control
 var target: InteractableObject
 var menu_target: InteractableObject
 var target_distance: float = 0.0
@@ -22,12 +23,12 @@ var menu_actions: Array[StringName] = []
 @onready var otis: OtisController = get_parent().get_node("Otis")
 
 func _ready() -> void:
-	var hud := Control.new()
+	hud = Control.new()
 	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(hud)
 	var heading := Label.new()
-	heading.text = "REQUISITION DENIED   /   RD–004"
+	heading.text = "REQUISITION DENIED   /   RD–005"
 	heading.position = Vector2(24, 18)
 	hud.add_child(heading)
 	help = Label.new()
@@ -91,6 +92,8 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _physics_process(delta: float) -> void:
+	if get_parent().terminal_session.active:
+		return
 	var placing := otis.placement.is_active()
 	if placing:
 		help.text = "Wheel Range  •  Hold R Rotate  •  Shift Axis  •  G Place  •  Esc Cancel"
@@ -159,6 +162,14 @@ func _physics_process(delta: float) -> void:
 		debug_label.text += get_parent().environmental_diagnostics()
 
 func _input(event: InputEvent) -> void:
+	var terminal: TerminalInteraction = get_parent().terminal_session
+	if is_instance_valid(terminal) and terminal.active:
+		if event.is_action("ui_cancel") and event.is_echo():
+			get_viewport().set_input_as_handled()
+			return
+		terminal.route(event)
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.echo:
 		return
 	if event.is_action_pressed("debug_overlay"):
@@ -201,7 +212,7 @@ func _input(event: InputEvent) -> void:
 		if e_pending and not e_consumed and gameplay_input_allowed():
 			if otis.manipulation.moving_object() != null:
 				service.request_actor_action(&"stop_move", otis)
-			else:
+			elif not (terminal.is_target(target) and terminal.enter()):
 				open_menu(target)
 		cancel_hold()
 		get_viewport().set_input_as_handled()
@@ -231,6 +242,10 @@ func handle_placement_controls(event: InputEvent) -> bool:
 			otis.placement.adjust_distance(-1)
 			return true
 	return false
+
+func set_terminal_active(active: bool) -> void:
+	cancel_hold()
+	hud.visible = not active
 
 func gameplay_input_allowed() -> bool:
 	return not menu_open and otis.controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
@@ -276,7 +291,8 @@ func rebuild_actions() -> void:
 	for action in menu_actions:
 		var button := Button.new()
 		button.text = String(action).replace("_", " ").capitalize()
-		button.disabled = action not in [&"inspect", &"pick_up", &"move"]
+		var use_terminal: bool = action == &"use_terminal" and get_parent().terminal_session.is_target(menu_target)
+		button.disabled = action not in [&"inspect", &"pick_up", &"move"] and not use_terminal
 		if button.disabled:
 			button.text += " — unavailable in RD-002"
 		button.pressed.connect(perform_action.bind(action))
@@ -285,6 +301,10 @@ func rebuild_actions() -> void:
 		menu_items.get_child(0).grab_focus()
 
 func perform_action(action: StringName) -> void:
+	if action == &"use_terminal" and get_parent().terminal_session.is_target(menu_target):
+		close_menu()
+		get_parent().terminal_session.enter()
+		return
 	var result := service.request(action, otis, otis.camera, menu_target, otis.interaction_distance, otis.knowledge)
 	if result.ok and action != &"inspect":
 		close_menu()

@@ -21,3 +21,8 @@ func has_inspected(object_id: StringName) -> bool:
 
 func records_for(object_id: StringName) -> Array:
 	return _inspections.get(object_id, []).duplicate(true)
+
+func inspected_ids() -> Array[StringName]:
+	var ids: Array[StringName] = []
+	ids.assign(_inspections.keys())
+	return ids
