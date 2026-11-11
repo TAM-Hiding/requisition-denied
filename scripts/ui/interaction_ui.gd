@@ -134,6 +134,8 @@ func _physics_process(delta: float) -> void:
 
 	debug_label.text += "\nHELD OBSTRUCTED  %s\nMOVEMENT LIMIT  %.2f m/s" % [str(otis.equipment.presentation.obstructed), otis.manipulation.effective_speed(otis.movement_speed)]
 
+	debug_label.text += "\nEQUIPMENT POSE  " + HeldItemPresentation.Pose.keys()[otis.equipment.presentation.requested_pose]
+
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.echo:
 		return

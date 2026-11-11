@@ -27,7 +27,8 @@ Escape/click capture and F3 remain available.
    Tap E or press G to release; Escape also releases it and frees the cursor.
    Walking out of reach, losing line of sight or alt-tabbing should release it.
    The crate never enters storage. Keep the wrench equipped while moving it;
-   its identity and HELD state must survive the interaction.
+   its identity and HELD state must survive the interaction. It should lower
+   smoothly during manipulation and return to NORMAL on release.
 7. Inspect the generator and terminal. Neither offers Pick Up or Move. Existing
    unavailable action placeholders remain clearly labeled.
 8. With a context menu open, move keys and equipment shortcuts must not manipulate
@@ -52,6 +53,8 @@ Run graphical assertions on a Linux display:
 godot --path . --script tests/validate_facility.gd
 godot --path . --script tests/validate_mobility.gd
 godot --path . --script tests/validate_manipulation_followup.gd
+godot --path . --script tests/validate_equipment_poses.gd
+godot --path . --script tests/validate_project_configuration.gd
 ```
 
 The mobility suite covers fixed/movable rejection, runtime mobility changes,
@@ -66,6 +69,9 @@ directly because a headless display cannot capture a pointer.
 `RD_SCREENSHOT=/absolute/path.png` captures the equipped wrench during the
 graphical mobility suite. The validation wrapper fails on script/runtime error
 messages as well as nonzero exits.
+
+See [final polish and configuration investigation](rd-002-final-polish.md) for
+pose tests, verified backends and the clean editor-cycle test.
 
 ## Recorded results
 

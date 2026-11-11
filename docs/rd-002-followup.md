@@ -49,7 +49,8 @@ No collision exceptions disable player/crate or wall/object collision. Stopping
 manipulation restores normal speed without rewriting Otis's configured speed.
 
 `HeldItemProfile` supplies a per-item Shape3D envelope, local envelope transform,
-camera-relative retracted position, margin and restoration speed. The wrench's
+camera-relative retraction offset, lateral clearance bound, pose offsets, margin
+and restoration speed. See `rd-002-final-polish.md` for the final pose/path behavior. The wrench's
 Resource authors a box envelope; other items can supply a capsule/sphere/box,
 or fall back to their existing collision shape. `HeldItemPresentation` keeps
 the existing camera anchor and frozen/layer-zero held object architecture.

@@ -3,6 +3,7 @@ extends Node
 ## Independent of equipment ownership. Otis updates this before/after movement.
 signal feedback(message: String)
 signal changed
+signal equipment_pose_requested(pose: HeldItemPresentation.Pose)
 @export var manipulation_reach: float = 3.5
 @export_range(0.1, 0.75) var movement_speed_ratio: float = 0.55
 @export var separation_margin: float = 0.18
@@ -45,6 +46,7 @@ func begin_move(item: InteractableObject) -> Dictionary:
 	item.move_velocity = Vector3.ZERO
 	item.state = InteractableObject.State.MOVING
 	item.sleeping = false
+	equipment_pose_requested.emit(HeldItemPresentation.Pose.LOWERED)
 	return result(true, "Moving %s. Tap E, G or Esc to release." % item.definition.display_name)
 
 func stop_move() -> Dictionary:
@@ -55,6 +57,7 @@ func stop_move() -> Dictionary:
 	_moving.linear_velocity.x = 0
 	_moving.linear_velocity.z = 0
 	_moving = null
+	equipment_pose_requested.emit(HeldItemPresentation.Pose.NORMAL)
 	return result(true, "Released object.")
 
 func prepare_movement() -> void:

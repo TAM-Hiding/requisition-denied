@@ -21,6 +21,7 @@ func _ready() -> void:
 	manipulation = EnvironmentalManipulation.new()
 	manipulation.name = "EnvironmentalManipulation"
 	add_child(manipulation)
+	manipulation.equipment_pose_requested.connect(equipment.presentation.request_pose)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:

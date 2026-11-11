@@ -5,7 +5,8 @@ Linux-first, low-poly immersive systems game built with **Godot 4.7.2 / GDScript
 RD-002 extends the foundation with a physical crate and a carryable wrench.
 One active equipment slot and a separate one-item storage container support
 pickup, stow, retrieve and safe drop. Held items retract around geometry, and
-crate manipulation remains available with equipment held. No full inventory UI is introduced.
+crate manipulation remains available with equipment held. Manipulation requests
+a smooth lowered pose; release restores the normal pose. No full inventory UI is introduced.
 
 RD-001 supplies a playable 12 × 12 × 4 m facility chamber, Otis's first-person
 controller, contextual inspection, and actor-owned session knowledge. No AI or
@@ -46,7 +47,7 @@ create duplicate entries. Restarting the session clears knowledge.
 - `scripts/actions/interaction_service.gd`: action permission and execution gate.
 - `scripts/knowledge/player_knowledge.gd`: per-actor learned snapshots, independent of world Resources.
 - `scripts/player/`: locomotion, equipment owner, independent environmental manipulation,
-  and held-item occupancy/presentation profiles.
+  and held-item occupancy/presentation profiles with independent NORMAL/LOWERED poses.
 - `scripts/ui/`: shared contextual menu, targeting hint, diagnostics.
 - `tests/`: engine-level validation and startup smoke test.
 
@@ -90,5 +91,6 @@ mouse-look. Set `RD_SCREENSHOT=/absolute/path.png` to capture the inspection UI
 at the end. Headless display servers cannot capture a real pointer, so those
 pointer assertions are deferred to graphical validation.
 
-See [RD-002 architecture, manual testing and limitations](docs/rd-002-testing.md)
+See [final pose/configuration validation](docs/rd-002-final-polish.md),
+[RD-002 architecture, manual testing and limitations](docs/rd-002-testing.md)
 and the [RD-001 regression walkthrough](docs/rd-001-testing.md).
