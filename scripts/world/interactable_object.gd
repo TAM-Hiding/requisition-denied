@@ -65,3 +65,6 @@ func _integrate_forces(body: PhysicsDirectBodyState3D) -> void:
 	var horizontal := Vector3(body.linear_velocity.x, 0, body.linear_velocity.z)
 	horizontal = horizontal.move_toward(desired, move_acceleration * body.step)
 	body.linear_velocity = Vector3(horizontal.x, body.linear_velocity.y, horizontal.z)
+
+func inspection_information() -> Dictionary:
+	return definition.inspection_information()

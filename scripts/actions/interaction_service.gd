@@ -7,7 +7,7 @@ func permitted(actor: Node3D, camera: Camera3D, target: InteractableObject, reac
 	if target.definition == null or not actor.is_inside_tree() or not target.is_inside_tree():
 		return false
 	var query := PhysicsRayQueryParameters3D.create(camera.global_position,
-		camera.global_position - camera.global_basis.z * reach, 1)
+		camera.global_position - camera.global_basis.z * reach, 5)
 	if actor is CollisionObject3D:
 		query.exclude = [actor.get_rid()]
 	var hit := actor.get_world_3d().direct_space_state.intersect_ray(query)
@@ -29,7 +29,7 @@ func request(action: StringName, actor: Node3D, camera: Camera3D,
 		return {"ok": false, "message": "Action unavailable."}
 	if knowledge == null:
 		return {"ok": false, "message": "No actor knowledge state."}
-	var information := target.definition.inspection_information()
+	var information := target.inspection_information()
 	knowledge.record_inspection(target.definition.object_id, information)
 	return {"ok": true, "information": information}
 

@@ -1,12 +1,19 @@
 extends Node3D
 ## Primitive-only room. Collision follows the same dimensions as presentation.
+const PLATE_CENTER := Vector3(2.7, 0, 1.4)
+const PLATE_WIDTH := 2.1
+var load_plate: PhysicalLoadSensor
+var barrier: PoweredBarrier
+var barrier_control: BarrierController
+
+
 func _ready() -> void:
 	var floor_mat := material(Color("343f46"))
 	var wall_mat := material(Color("697579"))
 	var dark := material(Color("202c33"))
 	var amber := material(Color("c89a43"))
 	var glow := material(Color("a2e7df"), true)
-	box(self, "Floor", Vector3(12.4, 0.3, 12.4), Vector3(0, -0.15, 0), floor_mat, true)
+	var floor := box(self, "Floor", Vector3(12.4, 0.3, 12.4), Vector3(0, -0.15, 0), floor_mat, true)
 	box(self, "Ceiling", Vector3(12.4, 0.3, 12.4), Vector3(0, 4.15, 0), dark, true)
 	box(self, "NorthWall", Vector3(12.4, 4, 0.2), Vector3(0, 2, -6.1), wall_mat, true)
 	box(self, "SouthWall", Vector3(12.4, 4, 0.2), Vector3(0, 2, 6.1), wall_mat, true)
@@ -57,6 +64,91 @@ func _ready() -> void:
 	label_at(terminal, "SERVICES\nUNAVAILABLE", Vector3(0, 0.1, 0.245), 24, Color("173a3b"))
 	label_at(generator, "AUX / 01", Vector3(0.45, 0.25, 0.665), 22)
 	label_at(crate, "STORAGE\n001", Vector3(0, 0, 0.66), 26)
+	build_load_station(floor as StaticBody3D, dark, amber, steel)
+
+func build_load_station(floor: StaticBody3D, dark: Material, amber: Material, steel: Material) -> void:
+	load_plate = PhysicalLoadSensor.new()
+	load_plate.name = "LoadPlate"
+	load_plate.sensor_id = &"RD-LOAD-001"
+	load_plate.definition = ObjectDefinition.new()
+	load_plate.definition.object_id = load_plate.sensor_id
+	load_plate.definition.display_name = "Industrial load sensor"
+	load_plate.definition.description = "A flush steel platform connected to the sliding barrier. Load must persist for 0.4 seconds."
+	load_plate.position = PLATE_CENTER
+	load_plate.support_surface = floor
+	load_plate.surface_size = Vector2.ONE * PLATE_WIDTH
+	load_plate.output = EnvironmentalSignal.new()
+	load_plate.output.source_id = &"RD-LOAD-001-OUT"
+	load_plate.add_child(load_plate.output)
+	load_plate.detection_area = Area3D.new()
+	load_plate.detection_area.collision_layer = 0
+	load_plate.detection_area.collision_mask = 3
+	load_plate.detection_area.monitorable = false
+	load_plate.add_child(load_plate.detection_area)
+	add_shape(load_plate.detection_area, Vector3(PLATE_WIDTH + 0.1, 3.9, PLATE_WIDTH + 0.1), Vector3(0, 1.9, 0))
+	add_shape(load_plate, Vector3(PLATE_WIDTH, 0.01, PLATE_WIDTH), Vector3(0, 0.005, 0))
+	add_child(load_plate)
+	# The continuous floor carries load. This thin layer is for inspection rays.
+	load_plate.collision_layer = 4
+	load_plate.collision_mask = 0
+	var deck := Node3D.new()
+	load_plate.add_child(deck)
+	box(deck, "Deck", Vector3(PLATE_WIDTH, 0.16, PLATE_WIDTH), Vector3(0, -0.066, 0), dark)
+	for x in [-0.91, 0.91]:
+		for z in [-0.8, -0.4, 0, 0.4, 0.8]:
+			box(deck, "Hazard", Vector3(0.13, 0.005, 0.24), Vector3(x, 0.018, z), amber)
+	var indicator := material(Color("d25042"), true)
+	box(load_plate, "Indicator", Vector3(0.26, 0.016, 0.07), Vector3(0, 0.023, 0.94), indicator)
+	load_plate.output.output_changed.connect(func(active: bool) -> void:
+		indicator.emission = Color("57ed86") if active else Color("d25042")
+		indicator.albedo_color = indicator.emission
+		deck.position.y = -0.009 if active else 0.0
+		log_environment("%s output %s" % [load_plate.sensor_id, active]))
+	var weight := make_object("test_weight", Vector3(4.4, 0.13, 2.1), Vector3(0.29, 0.23, 0.29), steel)
+	weight.name = "TestWeight"
+	label_at(weight, "8 KG", Vector3(0, 0, 0.15), 24, Color("202c33"))
+
+	barrier = PoweredBarrier.new()
+	barrier.name = "SteelBarrier"
+	barrier.barrier_id = &"RD-GATE-001"
+	barrier.closed_position = Vector3(4.65, 1.0, -4.35)
+	barrier.open_position = Vector3(4.65, 2.97, -4.35)
+	barrier.collision_layer = 1
+	barrier.collision_mask = 3
+	add_shape(barrier, Vector3(1.88, 1.92, 0.18), Vector3.ZERO)
+	box(barrier, "SteelPanel", Vector3(1.88, 1.92, 0.18), Vector3.ZERO, steel)
+	box(barrier, "CautionBand", Vector3(1.88, 0.13, 0.012), Vector3(0, -0.71, 0.096), amber)
+	label_at(barrier, "GATE 01", Vector3(0, 0.1, 0.1), 36, Color("202c33"))
+	add_child(barrier)
+	for x in [3.53, 5.77]:
+		box(self, "GatePost", Vector3(0.29, 3.95, 0.38), Vector3(x, 1.975, -4.35), dark, true)
+	box(self, "PlateConduit", Vector3(0.07, 0.007, 4.7), Vector3(3.79, 0.005, -1.55), amber)
+	box(self, "ConduitEnd", Vector3(0.92, 0.007, 0.07), Vector3(4.22, 0.005, -3.87), amber)
+	barrier_control = BarrierController.new()
+	barrier_control.actuator = barrier
+	barrier_control.inputs = [load_plate.output]
+	add_child(barrier_control)
+	barrier.state_changed.connect(func(_state: PoweredBarrier.State) -> void:
+		log_environment("%s %s" % [barrier.barrier_id, barrier.state_name()]))
+
+func add_shape(body: CollisionObject3D, size: Vector3, at: Vector3) -> void:
+	var collider := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = size
+	collider.shape = shape
+	collider.position = at
+	body.add_child(collider)
+
+func environmental_diagnostics() -> String:
+	return "\n%s  %.1f / %.1f kg\nPLATE %s  %s %s\n%s  INPUT %s\nGATE %s  OBSTRUCTED %s" % [
+		load_plate.sensor_id, load_plate.measured_kg, load_plate.activation_kg,
+		"ACTIVE" if load_plate.is_active() else "INACTIVE",
+		load_plate.output.source_id if is_instance_valid(load_plate.output) else &"UNAVAILABLE", load_plate.is_active(),
+		barrier.barrier_id, barrier_control.input_active, barrier.state_name(), barrier.state == PoweredBarrier.State.BLOCKED]
+
+func log_environment(message: String) -> void:
+	if $InteractionUI.debug_visible:
+		print("[Facility] ", message)
 
 func material(color: Color, emissive: bool = false) -> StandardMaterial3D:
 	var result := StandardMaterial3D.new()
@@ -68,7 +160,7 @@ func material(color: Color, emissive: bool = false) -> StandardMaterial3D:
 	return result
 
 func box(parent: Node3D, title: String, size: Vector3, at: Vector3,
-		mat: Material, solid: bool = false) -> void:
+		mat: Material, solid: bool = false) -> Node3D:
 	var root: Node3D = StaticBody3D.new() if solid else Node3D.new()
 	root.name = title
 	root.position = at
@@ -85,6 +177,7 @@ func box(parent: Node3D, title: String, size: Vector3, at: Vector3,
 		shape.size = size
 		collider.shape = shape
 		root.add_child(collider)
+	return root
 
 func make_object(kind: String, at: Vector3, size: Vector3, mat: Material) -> InteractableObject:
 	var object := InteractableObject.new()
