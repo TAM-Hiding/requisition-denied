@@ -86,6 +86,7 @@ func _ready() -> void:
 	status.position += Vector2(24, -76)
 	hud.add_child(status)
 	otis.equipment.feedback.connect(show_feedback)
+	otis.manipulation.feedback.connect(show_feedback)
 	panel.hide()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
@@ -111,7 +112,7 @@ func _physics_process(delta: float) -> void:
 		prompt.text = ""
 	elif Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		prompt.text = "Left-click to resume"
-	elif otis.equipment.moving_object() != null:
+	elif otis.manipulation.moving_object() != null:
 		prompt.text = "[E] Release object"
 	elif target != null:
 		prompt.text = "[E]  " + target.definition.display_name
@@ -128,8 +129,10 @@ func _physics_process(delta: float) -> void:
 		target.mobility_name() if target != null else "—",
 		target.state_name() if target != null else "—",
 		held.definition.object_id if held != null else &"none",
-		otis.equipment.stored_items().size(), str(otis.equipment.moving_object() != null)]
+		otis.equipment.stored_items().size(), str(otis.manipulation.moving_object() != null)]
 	debug_label.text += "\nEQUIPMENT STATE  " + ("HELD" if held != null else ("STOWED" if not otis.equipment.stored_items().is_empty() else "EMPTY"))
+
+	debug_label.text += "\nHELD OBSTRUCTED  %s\nMOVEMENT LIMIT  %.2f m/s" % [str(otis.equipment.presentation.obstructed), otis.manipulation.effective_speed(otis.movement_speed)]
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.echo:
@@ -143,8 +146,8 @@ func _input(event: InputEvent) -> void:
 		if menu_open:
 			close_menu()
 		else:
-			if otis.equipment.moving_object() != null:
-				service.request_equipment(&"stop_move", otis)
+			if otis.manipulation.moving_object() != null:
+				service.request_actor_action(&"stop_move", otis)
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("interact") and gameplay_input_allowed():
@@ -154,19 +157,19 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 	elif event.is_action_released("interact"):
 		if e_pending and not e_consumed and gameplay_input_allowed():
-			if otis.equipment.moving_object() != null:
-				service.request_equipment(&"stop_move", otis)
+			if otis.manipulation.moving_object() != null:
+				service.request_actor_action(&"stop_move", otis)
 			else:
 				open_menu(target)
 		cancel_hold()
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("drop_item") and gameplay_input_allowed():
 		cancel_hold()
-		service.request_equipment(&"stop_move" if otis.equipment.moving_object() != null else &"drop", otis)
+		service.request_actor_action(&"stop_move" if otis.manipulation.moving_object() != null else &"drop", otis)
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("equip_first") and gameplay_input_allowed():
 		cancel_hold()
-		service.request_equipment(&"equip_first", otis)
+		service.request_actor_action(&"equip_first", otis)
 		get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed and not menu_open:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -189,7 +192,7 @@ func advance_hold(delta: float) -> void:
 	e_elapsed += delta
 	if e_elapsed >= otis.interact_hold_threshold:
 		e_consumed = true
-		service.request_equipment(&"stow", otis)
+		service.request_actor_action(&"stow", otis)
 
 func show_feedback(message: String) -> void:
 	status.text = message
@@ -244,6 +247,6 @@ func close_menu() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		cancel_hold()
-		if is_instance_valid(otis) and otis.equipment != null and otis.equipment.moving_object() != null:
-			otis.equipment.stop_move()
+		if is_instance_valid(otis) and otis.equipment != null and otis.manipulation.moving_object() != null:
+			otis.manipulation.stop_move()
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE

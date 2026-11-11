@@ -15,4 +15,5 @@ run_check() {
 run_check --headless --editor --path . --quit
 run_check --headless --path . --script tests/validate_facility.gd
 run_check --headless --path . --script tests/validate_mobility.gd
+run_check --headless --path . --script tests/validate_manipulation_followup.gd
 run_check --headless --path . --quit-after 120

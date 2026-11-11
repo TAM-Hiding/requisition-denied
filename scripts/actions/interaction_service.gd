@@ -24,7 +24,7 @@ func request(action: StringName, actor: Node3D, camera: Camera3D,
 			return {"ok": false, "message": "Actor has no equipment controller."}
 		if action == &"pick_up":
 			return actor.equipment.pick_up(target)
-		return actor.equipment.begin_move(target)
+		return actor.manipulation.begin_move(target)
 	if action != &"inspect":
 		return {"ok": false, "message": "Action unavailable."}
 	if knowledge == null:
@@ -33,12 +33,12 @@ func request(action: StringName, actor: Node3D, camera: Camera3D,
 	knowledge.record_inspection(target.definition.object_id, information)
 	return {"ok": true, "information": information}
 
-func request_equipment(action: StringName, actor: OtisController) -> Dictionary:
+func request_actor_action(action: StringName, actor: OtisController) -> Dictionary:
 	if not is_instance_valid(actor) or actor.equipment == null or not actor.controls_enabled:
 		return {"ok": false, "message": "Equipment unavailable."}
 	match action:
 		&"stow": return actor.equipment.stow()
 		&"equip_first": return actor.equipment.equip_first()
 		&"drop": return actor.equipment.drop()
-		&"stop_move": return actor.equipment.stop_move()
+		&"stop_move": return actor.manipulation.stop_move()
 	return {"ok": false, "message": "Action unavailable."}

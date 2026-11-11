@@ -4,7 +4,8 @@ Linux-first, low-poly immersive systems game built with **Godot 4.7.2 / GDScript
 
 RD-002 extends the foundation with a physical crate and a carryable wrench.
 One active equipment slot and a separate one-item storage container support
-pickup, stow, retrieve and safe drop. No full inventory UI is introduced.
+pickup, stow, retrieve and safe drop. Held items retract around geometry, and
+crate manipulation remains available with equipment held. No full inventory UI is introduced.
 
 RD-001 supplies a playable 12 × 12 × 4 m facility chamber, Otis's first-person
 controller, contextual inspection, and actor-owned session knowledge. No AI or
@@ -44,7 +45,8 @@ create duplicate entries. Restarting the session clears knowledge.
 - `data/objects/`: crate, generator, terminal and wrench definitions and their action lists.
 - `scripts/actions/interaction_service.gd`: action permission and execution gate.
 - `scripts/knowledge/player_knowledge.gd`: per-actor learned snapshots, independent of world Resources.
-- `scripts/player/`: configurable locomotion, camera, targeting ray and equipment owner.
+- `scripts/player/`: locomotion, equipment owner, independent environmental manipulation,
+  and held-item occupancy/presentation profiles.
 - `scripts/ui/`: shared contextual menu, targeting hint, diagnostics.
 - `tests/`: engine-level validation and startup smoke test.
 
@@ -80,6 +82,7 @@ For graphical validation, run the suite without `--headless`:
 ```bash
 godot --path . --script tests/validate_facility.gd
 godot --path . --script tests/validate_mobility.gd
+godot --path . --script tests/validate_manipulation_followup.gd
 ```
 
 Graphical validation additionally checks captured mouse state, movement and

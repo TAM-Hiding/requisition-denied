@@ -6,6 +6,7 @@ enum State { WORLD, HELD, STOWED, MOVING }
 var state: State = State.WORLD
 var _mobility_override: int = -1
 var move_goal: Vector3
+var move_velocity: Vector3
 @export var move_speed: float = 2.5
 @export var move_acceleration: float = 20.0
 
@@ -60,7 +61,7 @@ func _integrate_forces(body: PhysicsDirectBodyState3D) -> void:
 		return
 	var error := move_goal - body.transform.origin
 	error.y = 0
-	var desired := (error * 4.0).limit_length(move_speed)
+	var desired := (move_velocity + error * 4.0).limit_length(move_speed)
 	var horizontal := Vector3(body.linear_velocity.x, 0, body.linear_velocity.z)
 	horizontal = horizontal.move_toward(desired, move_acceleration * body.step)
 	body.linear_velocity = Vector3(horizontal.x, body.linear_velocity.y, horizontal.z)

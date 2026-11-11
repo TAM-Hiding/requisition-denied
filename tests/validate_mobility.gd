@@ -6,6 +6,7 @@ var facility: Node3D
 var otis: OtisController
 var ui: CanvasLayer
 var equipment: EquipmentController
+var manipulation: EnvironmentalManipulation
 
 func check(value: bool, message: String) -> void:
 	checks += 1
@@ -43,8 +44,9 @@ func run() -> void:
 	otis = facility.get_node("Otis")
 	ui = facility.get_node("InteractionUI")
 	equipment = otis.equipment
+	manipulation = otis.manipulation
 	# Deterministic environment-movement force tests work with headless pointer servers.
-	equipment.set_physics_process(false)
+	manipulation.process_mode = Node.PROCESS_MODE_DISABLED
 	await frames(10)
 	var wrench := facility.get_node("Wrench") as InteractableObject
 	var crate := facility.get_node("Crate") as InteractableObject
@@ -59,7 +61,7 @@ func run() -> void:
 		check(fixed.freeze and fixed.mobility() == ObjectDefinition.Mobility.FIXED, "Fixed body remains fixed")
 		check(not fixed.query_actions().has(&"pick_up") and not fixed.query_actions().has(&"move"), "Fixed actions exclude manipulation")
 		check(not request(&"pick_up", fixed).ok and not request(&"move", fixed).ok, "Fixed action requests rejected")
-		check(not equipment.pick_up(fixed).ok and not equipment.begin_move(fixed).ok, "Equipment also rejects fixed bodies")
+		check(not equipment.pick_up(fixed).ok and not manipulation.begin_move(fixed).ok, "Equipment also rejects fixed bodies")
 	check(crate.query_actions().has(&"move") and not crate.query_actions().has(&"pick_up"), "Movable action classification")
 	await aim_at(crate)
 	check(not request(&"pick_up", crate).ok, "Movable cannot be picked up")
@@ -75,7 +77,7 @@ func run() -> void:
 	crate.move_goal = Vector3(-20, crate.position.y, crate.position.z)
 	await frames(190)
 	check(crate.global_position.x > -5.4, "Driven crate respects wall collider")
-	check(equipment.stop_move().ok and crate.state == InteractableObject.State.WORLD, "Release returns ordinary physics")
+	check(manipulation.stop_move().ok and crate.state == InteractableObject.State.WORLD, "Release returns ordinary physics")
 	check(crate.query_actions().has(&"move"), "Move action returns after release")
 	# Runtime mobility override is instance-local; no definition rewrite.
 	var generator := facility.get_node("Generator") as InteractableObject
@@ -105,7 +107,7 @@ func run() -> void:
 	equipment.storage_capacity = 0
 	check(not equipment.stow().ok and equipment.held_item() == wrench and not ui.status.text.is_empty(), "Full storage keeps item held with feedback")
 	equipment.storage_capacity = 1
-	check(service.request_equipment(&"stow", otis).ok, "Held to stowed")
+	check(service.request_actor_action(&"stow", otis).ok, "Held to stowed")
 	check(equipment.held_item() == null and equipment.stored_items() == [wrench], "Stored differs from active equipment")
 	check(wrench.state == InteractableObject.State.STOWED and not wrench.visible and wrench.freeze, "Stowed item hidden and frozen")
 	await frames(2)
@@ -114,7 +116,7 @@ func run() -> void:
 	var references := equipment.stored_items()
 	references.clear()
 	check(equipment.stored_items().size() == 1, "Storage reference list is defensive copy")
-	check(service.request_equipment(&"equip_first", otis).ok, "Stowed to held")
+	check(service.request_actor_action(&"equip_first", otis).ok, "Stowed to held")
 	check(equipment.held_item() == wrench and equipment.stored_items().is_empty(), "Retrieve removes stored reference")
 	check(not equipment.equip_first().ok, "Retrieve cannot duplicate equipped reference")
 	check(wrench.get_instance_id() == instance_id and wrench.definition.object_id == object_id, "Identity persists through equipment transitions")
@@ -130,7 +132,7 @@ func run() -> void:
 	check(not equipment.drop().ok and wrench.state == InteractableObject.State.HELD, "Downward drop refuses overlap with player")
 	otis.camera.rotation = Vector3.ZERO
 	await frames(3)
-	check(service.request_equipment(&"drop", otis).ok, "Held to world drop")
+	check(service.request_actor_action(&"drop", otis).ok, "Held to world drop")
 	check(equipment.held_item() == null and equipment.stored_items().is_empty(), "Drop clears equipment ownership")
 	check(wrench.get_parent() == facility and wrench.visible and not wrench.freeze and wrench.collision_layer == 1, "Drop restores world physics and presentation")
 	var dropped_y := wrench.global_position.y
@@ -173,12 +175,12 @@ func run() -> void:
 		input_action(&"drop_item", true)
 		check(wrench.state == InteractableObject.State.WORLD, "G drops through input")
 		# Use actual controller follow goal and autorelease safeguards.
-		equipment.set_physics_process(true)
+		manipulation.process_mode = Node.PROCESS_MODE_INHERIT
 		await aim_at(crate)
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		check(request(&"move", crate).ok, "Graphical Move begins")
 		await frames(5)
-		check(equipment.moving_object() == crate, "Move persists while captured and in reach")
+		check(manipulation.moving_object() == crate, "Move persists while captured and in reach")
 		var before_follow := crate.global_position
 		otis.rotation.y = -PI / 2
 		await frames(45)
@@ -186,12 +188,12 @@ func run() -> void:
 		input_action(&"interact", true)
 		ui.advance_hold(0.1)
 		input_action(&"interact", false)
-		check(equipment.moving_object() == null and not ui.menu_open, "Tap E releases move without menu")
+		check(manipulation.moving_object() == null and not ui.menu_open, "Tap E releases move without menu")
 		await aim_at(crate)
 		check(request(&"move", crate).ok, "Move restarts")
 		otis.position = Vector3(0, 0.02, 4)
 		await frames(3)
-		check(equipment.moving_object() == null, "Out-of-range manipulation autoreleases")
+		check(manipulation.moving_object() == null, "Out-of-range manipulation autoreleases")
 	facility.queue_free()
 	await process_frame
 	print("RD-002: %d checks, %d failures" % [checks, failures])

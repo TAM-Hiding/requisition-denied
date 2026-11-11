@@ -4,11 +4,9 @@ extends Node
 signal feedback(message: String)
 signal changed
 @export var storage_capacity: int = 1
-@export var manipulation_reach: float = 3.5
 var _held: InteractableObject
 var _stored: Array[InteractableObject] = []
-var _moving: InteractableObject
-var _move_distance: float = 2.0
+var presentation: HeldItemPresentation
 var _world_parent: Node3D
 @onready var actor: OtisController = get_parent() as OtisController
 @onready var anchor: Node3D = actor.get_node("Camera3D/EquipmentAnchor")
@@ -19,8 +17,11 @@ func held_item() -> InteractableObject:
 func stored_items() -> Array[InteractableObject]:
 	return _stored.duplicate()
 
-func moving_object() -> InteractableObject:
-	return _moving
+func _ready() -> void:
+	presentation = HeldItemPresentation.new()
+	presentation.name = "HeldPresentation"
+	add_child(presentation)
+	presentation.configure(actor, anchor)
 
 func result(ok: bool, message: String) -> Dictionary:
 	feedback.emit(message)
@@ -31,7 +32,7 @@ func result(ok: bool, message: String) -> Dictionary:
 func pick_up(item: InteractableObject) -> Dictionary:
 	if not is_instance_valid(item) or item.mobility() != ObjectDefinition.Mobility.CARRYABLE or item.state != InteractableObject.State.WORLD:
 		return result(false, "That object cannot be picked up.")
-	if _held != null or _moving != null or _stored.has(item):
+	if _held != null or _stored.has(item):
 		return result(false, "Free your active equipment slot first.")
 	_world_parent = actor.get_tree().current_scene as Node3D
 	if _world_parent == null:
@@ -50,6 +51,7 @@ func attach(item: InteractableObject) -> void:
 	item.reparent(anchor)
 	item.transform = Transform3D.IDENTITY
 	item.show()
+	presentation.track(item)
 
 func stow() -> Dictionary:
 	if _held == null:
@@ -61,13 +63,14 @@ func stow() -> Dictionary:
 	var item := _held
 	_stored.append(item)
 	_held = null
+	presentation.clear()
 	item.state = InteractableObject.State.STOWED
 	item.reparent(self)
 	item.hide()
 	return result(true, "Stowed %s. Press 1 to retrieve." % item.definition.display_name)
 
 func equip_first() -> Dictionary:
-	if _held != null or _moving != null:
+	if _held != null:
 		return result(false, "Free your active equipment slot first.")
 	if _stored.is_empty():
 		return result(false, "No stored equipment.")
@@ -114,44 +117,6 @@ func drop() -> Dictionary:
 		item.linear_velocity = Vector3.ZERO
 		item.angular_velocity = Vector3.ZERO
 		_held = null
+		presentation.clear()
 		return result(true, "Dropped %s." % item.definition.display_name)
 	return result(false, "No clear space to drop. Step back or look elsewhere.")
-
-func begin_move(item: InteractableObject) -> Dictionary:
-	if not is_instance_valid(item) or item.mobility() != ObjectDefinition.Mobility.MOVABLE or item.state != InteractableObject.State.WORLD:
-		return result(false, "That object cannot be moved.")
-	if _held != null or _moving != null:
-		return result(false, "Free your active equipment slot first.")
-	_moving = item
-	_move_distance = clampf(actor.global_position.distance_to(item.global_position), 1.5, 2.5)
-	item.move_goal = item.global_position
-	item.state = InteractableObject.State.MOVING
-	item.sleeping = false
-	return result(true, "Moving %s. Tap E, G or Esc to release." % item.definition.display_name)
-
-func stop_move() -> Dictionary:
-	if _moving == null:
-		return result(false, "No environmental manipulation active.")
-	_moving.state = InteractableObject.State.WORLD
-	# Release without imparting a throw.
-	_moving.linear_velocity.x = 0
-	_moving.linear_velocity.z = 0
-	_moving = null
-	return result(true, "Released object.")
-
-func _physics_process(_delta: float) -> void:
-	if _moving == null:
-		return
-	var separation := actor.global_position.distance_to(_moving.global_position)
-	if separation > manipulation_reach or not actor.controls_enabled or Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
-		stop_move()
-		return
-	var ray := PhysicsRayQueryParameters3D.create(actor.camera.global_position, _moving.global_position, 1)
-	ray.exclude = [actor.get_rid()]
-	var hit := actor.get_world_3d().direct_space_state.intersect_ray(ray)
-	if not hit.is_empty() and hit.collider != _moving:
-		stop_move()
-		return
-	var forward := -actor.global_basis.z
-	_moving.move_goal = actor.global_position + forward * _move_distance
-	_moving.move_goal.y = _moving.global_position.y
