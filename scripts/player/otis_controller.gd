@@ -1,5 +1,6 @@
 class_name OtisController
 extends CharacterBody3D
+@export_range(0.1, 300.0) var body_mass_kg := 80.0
 @export var movement_speed: float = 4.0
 @export var acceleration: float = 18.0
 @export var mouse_sensitivity: float = 0.0025
@@ -54,6 +55,6 @@ func _physics_process(delta: float) -> void:
 
 func target_hit() -> Dictionary:
 	var query := PhysicsRayQueryParameters3D.create(camera.global_position,
-		camera.global_position - camera.global_basis.z * interaction_distance, 1)
+		camera.global_position - camera.global_basis.z * interaction_distance, 5)
 	query.exclude = [get_rid()]
 	return get_world_3d().direct_space_state.intersect_ray(query)

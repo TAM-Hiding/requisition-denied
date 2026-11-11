@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="ObjectDefinition" load_steps=2 format=3]
+[ext_resource type="Script" path="res://scripts/world/object_definition.gd" id="1"]
+[resource]
+script = ExtResource("1")
+object_id = &"RD-WEIGHT-001"
+display_name = "8 kg calibration weight"
+description = "A portable steel calibration block with its mass stamped on the face."
+mass_kg = 8.0
+mobility = 2

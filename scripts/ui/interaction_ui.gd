@@ -26,7 +26,7 @@ func _ready() -> void:
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(hud)
 	var heading := Label.new()
-	heading.text = "REQUISITION DENIED   /   RD–002"
+	heading.text = "REQUISITION DENIED   /   RD–003"
 	heading.position = Vector2(24, 18)
 	hud.add_child(heading)
 	var help := Label.new()
@@ -121,9 +121,13 @@ func _physics_process(delta: float) -> void:
 	var actions: Array[StringName] = []
 	if target != null:
 		actions = target.query_actions()
+	var target_id: StringName = target.definition.object_id if target != null else &"none"
+	if hit.get("collider") is PoweredBarrier:
+		target_id = hit.collider.barrier_id
+		target_distance = otis.camera.global_position.distance_to(hit.position)
 	debug_label.text = "TARGET  %s\nDISTANCE  %s\nACTIONS  %s\nINSPECTED OBJECTS  %d" % [
-		target.definition.object_id if target != null else &"none",
-		"%.2f m" % target_distance if target != null else "—", str(actions), otis.knowledge.inspected_object_count()]
+		target_id,
+		"%.2f m" % target_distance if target_id != &"none" else "—", str(actions), otis.knowledge.inspected_object_count()]
 	var held := otis.equipment.held_item()
 	debug_label.text += "\nMOBILITY  %s\nSTATE  %s\nEQUIPPED  %s\nSTORED  %d\nMOVING  %s" % [
 		target.mobility_name() if target != null else "—",
@@ -135,6 +139,9 @@ func _physics_process(delta: float) -> void:
 	debug_label.text += "\nHELD OBSTRUCTED  %s\nMOVEMENT LIMIT  %.2f m/s" % [str(otis.equipment.presentation.obstructed), otis.manipulation.effective_speed(otis.movement_speed)]
 
 	debug_label.text += "\nEQUIPMENT POSE  " + HeldItemPresentation.Pose.keys()[otis.equipment.presentation.requested_pose]
+
+	if debug_visible:
+		debug_label.text += get_parent().environmental_diagnostics()
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.echo:
