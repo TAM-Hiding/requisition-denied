@@ -1,6 +1,9 @@
 class_name ObjectDefinition
 extends Resource
 ## Authoritative properties; never store actor knowledge on this resource.
+enum Mobility { FIXED, MOVABLE, CARRYABLE }
+@export var held_profile: HeldItemProfile
+@export var mobility: Mobility = Mobility.FIXED
 @export var object_id: StringName
 @export var display_name: String
 @export_multiline var description: String

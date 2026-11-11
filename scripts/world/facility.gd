@@ -43,6 +43,13 @@ func _ready() -> void:
 	box(generator, "ControlPanel", Vector3(0.65, 0.5, 0.05), Vector3(0.45, 0.25, 0.63), dark)
 	for y in [-0.3, -0.1, 0.1, 0.3]:
 		box(generator, "Vent", Vector3(0.65, 0.055, 0.04), Vector3(-0.45, y, 0.63), dark)
+	var wrench := make_object("wrench", Vector3(0, 0.1, 0), Vector3(0.11, 0.08, 0.35), dark)
+	wrench.get_node("Model").queue_free()
+	var steel := material(Color("b0bdc4"))
+	box(wrench, "Handle", Vector3(0.045, 0.04, 0.25), Vector3(0, 0, 0.035), steel)
+	box(wrench, "JawLeft", Vector3(0.035, 0.05, 0.11), Vector3(-0.0375, 0, -0.11), steel)
+	box(wrench, "JawRight", Vector3(0.035, 0.05, 0.11), Vector3(0.0375, 0, -0.11), steel)
+	box(wrench, "JawBridge", Vector3(0.11, 0.05, 0.035), Vector3(0, 0, -0.05), steel)
 	var terminal := make_object("terminal", Vector3(0, 1.6, -5.8), Vector3(1.2, 1.1, 0.4), dark)
 	box(terminal, "Screen", Vector3(1, 0.65, 0.03), Vector3(0, 0.1, 0.22), glow)
 	box(terminal, "Keyboard", Vector3(1, 0.1, 0.3), Vector3(0, -0.45, 0.28), wall_mat)
@@ -89,6 +96,7 @@ func make_object(kind: String, at: Vector3, size: Vector3, mat: Material) -> Int
 	var collision := CollisionShape3D.new()
 	var shape := BoxShape3D.new()
 	shape.size = size
+	collision.name = "CollisionShape3D"
 	collision.shape = shape
 	object.add_child(collision)
 	return object

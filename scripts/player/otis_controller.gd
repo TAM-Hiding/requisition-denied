@@ -6,12 +6,22 @@ extends CharacterBody3D
 @export var camera_fov: float = 75.0
 @export var interaction_distance: float = 3.0
 @export var gravity: float = 9.8
+@export var interact_hold_threshold: float = 0.35
+var equipment: EquipmentController
+var manipulation: EnvironmentalManipulation
 var knowledge := PlayerKnowledge.new()
 var controls_enabled: bool = true
 @onready var camera: Camera3D = $Camera3D
 
 func _ready() -> void:
 	camera.fov = camera_fov
+	equipment = EquipmentController.new()
+	equipment.name = "Equipment"
+	add_child(equipment)
+	manipulation = EnvironmentalManipulation.new()
+	manipulation.name = "EnvironmentalManipulation"
+	add_child(manipulation)
+	manipulation.equipment_pose_requested.connect(equipment.presentation.request_pose)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
@@ -19,6 +29,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		camera.rotation.x = clampf(camera.rotation.x - event.relative.y * mouse_sensitivity, -1.5, 1.5)
 
 func _physics_process(delta: float) -> void:
+	if manipulation.can_process():
+		manipulation.prepare_movement()
+	var speed := manipulation.effective_speed(movement_speed)
+	var movement_acceleration := manipulation.effective_acceleration(acceleration)
 	var direction := Vector3.ZERO
 	if controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var axis := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
@@ -27,13 +41,16 @@ func _physics_process(delta: float) -> void:
 		velocity.x = 0
 		velocity.z = 0
 	else:
-		velocity.x = move_toward(velocity.x, direction.x * movement_speed, acceleration * delta)
-		velocity.z = move_toward(velocity.z, direction.z * movement_speed, acceleration * delta)
+		velocity.x = move_toward(velocity.x, direction.x * speed, movement_acceleration * delta)
+		velocity.z = move_toward(velocity.z, direction.z * speed, movement_acceleration * delta)
 	if not is_on_floor():
 		velocity.y -= gravity * delta
 	else:
 		velocity.y = 0
+	velocity = manipulation.constrain_velocity(velocity, delta)
 	move_and_slide()
+	if manipulation.can_process():
+		manipulation.update_goal()
 
 func target_hit() -> Dictionary:
 	var query := PhysicsRayQueryParameters3D.create(camera.global_position,

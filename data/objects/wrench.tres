@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="ObjectDefinition" load_steps=5 format=3]
+[ext_resource type="Script" path="res://scripts/world/object_definition.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/player/held_item_profile.gd" id="2"]
+[sub_resource type="BoxShape3D" id="Envelope"]
+size = Vector3(0.14, 0.1, 0.39)
+[sub_resource type="Resource" id="HeldProfile"]
+script = ExtResource("2")
+envelope = SubResource("Envelope")
+[resource]
+script = ExtResource("1")
+object_id = &"RD-WRENCH-001"
+display_name = "Service wrench"
+description = "A small steel service wrench. Stamped on the handle: RETURN TO AUTHORIZED STORAGE."
+mass_kg = 0.6
+condition = "Intact"
+mobility = 2
+held_profile = SubResource("HeldProfile")
+available_actions = Array[StringName]([&"inspect"])
