@@ -12,6 +12,7 @@ var equipment: EquipmentController
 var manipulation: EnvironmentalManipulation
 var knowledge := PlayerKnowledge.new()
 var controls_enabled: bool = true
+@onready var placement: PrecisionPlacement = $PrecisionPlacement
 @onready var camera: Camera3D = $Camera3D
 
 func _ready() -> void:
@@ -26,6 +27,9 @@ func _ready() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		if placement.is_active() and placement.rotating:
+			placement.rotate_from_mouse(event.relative.x)
+			return
 		rotate_y(-event.relative.x * mouse_sensitivity)
 		camera.rotation.x = clampf(camera.rotation.x - event.relative.y * mouse_sensitivity, -1.5, 1.5)
 

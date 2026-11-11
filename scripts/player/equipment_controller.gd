@@ -6,6 +6,7 @@ signal changed
 @export var storage_capacity: int = 1
 var _held: InteractableObject
 var _stored: Array[InteractableObject] = []
+var placing := false
 var presentation: HeldItemPresentation
 var _world_parent: Node3D
 @onready var actor: OtisController = get_parent() as OtisController
@@ -48,12 +49,15 @@ func attach(item: InteractableObject) -> void:
 	item.collision_layer = 0
 	item.collision_mask = 0
 	item.state = InteractableObject.State.HELD
-	item.reparent(anchor)
+	if item.get_parent() != anchor:
+		item.reparent(anchor)
 	item.transform = Transform3D.IDENTITY
 	item.show()
 	presentation.track(item)
 
 func stow() -> Dictionary:
+	if placing:
+		return result(false, "Finish or cancel placement first.")
 	if _held == null:
 		return result(false, "No held item to stow.")
 	if _held.mobility() != ObjectDefinition.Mobility.CARRYABLE or _held.state != InteractableObject.State.HELD:
@@ -83,6 +87,8 @@ func equip_first() -> Dictionary:
 	return result(true, "Equipped %s." % item.definition.display_name)
 
 func drop() -> Dictionary:
+	if placing:
+		return result(false, "Finish or cancel placement first.")
 	if _held == null:
 		return result(false, "No held item to drop.")
 	var item := _held
@@ -107,16 +113,46 @@ func drop() -> Dictionary:
 		query.exclude = [item.get_rid()]
 		if not space.intersect_shape(query, 1).is_empty():
 			continue
-		item.reparent(_world_parent)
-		item.global_transform = candidate
-		item.state = InteractableObject.State.WORLD
-		item.collision_layer = 1
-		item.collision_mask = 3
-		item.freeze = false
-		item.sleeping = false
-		item.linear_velocity = Vector3.ZERO
-		item.angular_velocity = Vector3.ZERO
-		_held = null
-		presentation.clear()
-		return result(true, "Dropped %s." % item.definition.display_name)
+		return release_to_world(candidate, false)
 	return result(false, "No clear space to drop. Step back or look elsewhere.")
+
+func begin_placement() -> bool:
+	if placing or _held == null:
+		return false
+	var pose := _held.global_transform
+	placing = true
+	presentation.clear()
+	_held.top_level = true
+	_held.global_transform = pose
+	_held.show()
+	return true
+
+func cancel_placement() -> void:
+	if placing and _held != null:
+		placing = false
+		_held.top_level = false
+		attach(_held)
+
+func finish_placement(pose: Transform3D) -> Dictionary:
+	if not placing or _held == null:
+		return result(false, "No object in placement mode.")
+	return release_to_world(pose, true)
+
+func release_to_world(pose: Transform3D, precision: bool) -> Dictionary:
+	var item := _held
+	item.reparent(_world_parent)
+	item.top_level = false
+	item.global_transform = pose
+	item.state = InteractableObject.State.WORLD
+	item.collision_layer = 1
+	item.collision_mask = 3
+	item.lock_rotation = not precision
+	item.freeze = false
+	item.sleeping = false
+	item.linear_velocity = Vector3.ZERO
+	item.angular_velocity = Vector3.ZERO
+	_held = null
+	placing = false
+	presentation.clear()
+	var verb := "Placed" if precision else "Dropped"
+	return result(true, "%s %s." % [verb, item.definition.display_name])
