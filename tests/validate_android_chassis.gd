@@ -1,6 +1,5 @@
 extends SceneTree
 
-const DT := 1.0 / 60.0
 var checks := 0
 var failures := 0
 
@@ -57,9 +56,10 @@ func run() -> void:
 	var crate: InteractableObject = facility.get_node("Crate")
 	var weight: InteractableObject = facility.get_node("TestWeight")
 	var wrench: InteractableObject = facility.get_node("Wrench")
-	var carry := actor.carry
+	var placement := actor.placement
 	var plate: PhysicalLoadSensor = facility.load_plate
 	var ui := facility.get_node("InteractionUI")
+	ui.set_physics_process(false)
 	var identity := crate.get_instance_id()
 	var shape: Shape3D = crate.get_node("CollisionShape3D").shape
 	check(chassis_values(actor.chassis) == same, "Facility creates Otis's requested seeded chassis")
@@ -69,65 +69,114 @@ func run() -> void:
 	check(crate.mass == 35.0 and weight.mass == 8.0 and plate.activation_kg == 40.0 and plate.release_kg == 37.0,
 		"Load masses and thresholds retain their original values")
 	actor.global_position = Vector3(-2.5, 0.01, 1.15)
-	actor.camera.look_at(crate.global_position)
 	await frames(4)
-	check(crate.query_actions().has(&"lift") and crate.query_actions().has(&"move"), "Crate exposes both Lift and Move")
+	aim(actor, crate.global_position)
+	check(crate.query_actions().has(&"move") and crate.query_actions().has(&"inspect")
+		and not crate.query_actions().has(&"lift"), "Context retains Move and Inspect")
+	placement.press_drop(1000000)
+	placement.advance_drop(1199999)
+	placement.release_drop(1199999)
+	check(not placement.is_active() and not crate.freeze, "Short G tap never grabs")
+	grab(actor, crate)
+	check(placement.is_grabbing() and crate.freeze and crate.get_instance_id() == identity
+		and crate.get_node("CollisionShape3D").shape == shape and crate.mass == 35.0
+		and crate.collision_layer == 1 and crate.get_parent() == facility, "Hold G acquires the original collidable world body")
+	check(not actor.manipulation.begin_move(crate).ok and not facility.terminal_session.enter(),
+		"Grab owns the interaction")
+	var origin_y := crate.position.y
+	var initial_basis := crate.basis
+	var initial_range := placement.distance
+	placement.adjust_distance(1)
+	check(placement.distance > initial_range, "Grab shares wheel range adjustment")
+	aim(actor, crate.position + Vector3.UP * 0.55)
+	await frames(30)
+	placement.rotating = true
+	placement.cycle_axis()
+	placement.rotate_from_mouse(55)
+	await frames(30)
+	placement.rotating = false
+	check(crate.position.y > origin_y + 0.25 and not crate.basis.is_equal_approx(initial_basis)
+		and placement.valid, "Grab follows camera lift and shares manual rotation")
+	actor.camera.look_at(actor.camera.global_position + Vector3(0, 1, -0.1))
+	check(actor.target_hit().get("collider") != crate and placement.is_grabbing(), "Losing targeting does not release the grab")
+	var clear_pose := crate.global_transform
+	placement.release_drop(1300000)
+	check(not placement.is_active() and not crate.freeze and crate.global_transform == clear_pose,
+		"Key-up immediately restores physics at the last clear pose")
+	await frames(45)
+	check(crate.position.y < clear_pose.origin.y - 0.22 and placement.load_fraction() == 0.0,
+		"Released crate falls and unloaded movement returns")
+	var prior := 1.01
+	var smooth := true
+	for step in 111:
+		var factor := PrecisionPlacement.response_factor(step, 100.0)
+		smooth = smooth and factor <= prior and prior - factor <= 0.011 and factor >= 0.299
+		prior = factor
+	check(smooth and PrecisionPlacement.response_factor(10, 100) > PrecisionPlacement.response_factor(90, 100),
+		"Response falls smoothly to a bounded floor as load increases")
+
+	place(crate, Vector3(-2.5, 0.65, -0.5))
+	await frames(12)
 	crate.mass = 55.0
-	var before := crate.global_transform
-	check(not carry.lift(crate).ok and carry.item == null and crate.state == InteractableObject.State.WORLD
-		and not crate.freeze and crate.global_transform == before, "Over-capacity lift leaves world state intact")
-	check(actor.manipulation.begin_move(crate).ok, "Over-capacity crate can still be pushed or dragged")
+	grab(actor, crate)
+	check(placement.is_supported_grab() and not crate.freeze and placement.suspended_mass_kg() == 0.0,
+		"Overweight grab keeps dynamics and transfers no mass to Otis")
+	var heavy_origin := crate.position
+	aim(actor, heavy_origin + Vector3.RIGHT * 0.55 + Vector3.UP * 0.55)
+	placement.rotate_from_mouse(100)
+	await frames(45)
+	check(crate.position.x > heavy_origin.x + 0.15 and crate.position.y < 0.67,
+		"Overweight grab slides under gravity without a lifting or rotation command")
+	var escape := InputEventAction.new()
+	escape.action = "ui_cancel"
+	escape.pressed = true
+	ui._input(escape)
+	check(not placement.is_active() and not crate.freeze and crate.state == InteractableObject.State.WORLD,
+		"Escape releases the supported grab")
+	check(actor.manipulation.begin_move(crate).ok, "Contextual Move remains available above lift limit")
 	actor.manipulation.stop_move()
 	crate.mass = 35.0
-	check(actor.equipment.pick_up(wrench).ok, "Handheld equipment can remain equipped")
-	ui.open_menu(crate)
-	check(ui.menu_open and ui.menu_actions.has(&"lift"), "Lift is available in the interaction menu")
-	ui.perform_action(&"lift")
-	check(not ui.menu_open and carry.item == crate and crate.state == InteractableObject.State.CARRIED,
-		"Contextual Lift takes carry ownership. HUD: " + ui.information.text)
-	if carry.item != crate:
-		facility.queue_free()
-		quit(1)
-		return
-	check(crate.get_instance_id() == identity and crate.get_node("CollisionShape3D").shape == shape
-		and crate.mass == 35.0 and crate.collision_layer == 1 and crate.get_parent() == facility,
-		"Carried crate keeps identity, mass, shape and its world collider")
-	var fraction := 35.0 / same[AndroidChassis.Attribute.LIFT_KG]
-	check(is_equal_approx(carry.speed_factor(), 1.0 - 0.25 * fraction)
-		and is_equal_approx(carry.acceleration_factor(), 1.0 - 0.30 * fraction), "Carry modifiers scale with actual load fraction")
-	check(not actor.manipulation.begin_move(crate).ok and not actor.placement.begin()
-		and not facility.terminal_session.enter(), "Carry prevents competing world interaction modes")
-	check(actor.equipment.held_item() == wrench, "Carry preserves equipped wrench")
-	await frames(15)
-	var release_pose := crate.global_transform
-	check(carry.release().ok and crate.global_transform == release_pose and not crate.freeze
-		and crate.state == InteractableObject.State.WORLD, "Release restores physics at the same pose")
-	await frames(32)
-	check(crate.global_position.y < release_pose.origin.y - 0.15 and carry.speed_factor() == 1.0
-		and carry.acceleration_factor() == 1.0, "Crate settles and movement returns to unloaded values")
-	check(actor.equipment.stow().ok and actor.equipment.equip_first().ok and actor.equipment.drop().ok,
-		"Handheld equipment can be stowed, retrieved and dropped after carrying")
-	place(wrench, Vector3(0, 0.1, 0))
 
 	await check_obstacle(actor, crate, Vector3(2.5, 0.01, 4.7), Vector3.RIGHT, 6.0, "east wall")
 	await check_obstacle(actor, crate, Vector3(0, 0.01, -2.6), Vector3.FORWARD, 5.04, "terminal desk")
 	await check_obstacle(actor, crate, Vector3(4.65, 0.01, -1.3), Vector3.FORWARD, 4.26, "closed gate")
 
-	actor.global_position = plate.global_position + Vector3(0, 0.01, 2.4)
-	actor.rotation.y = 0.0
-	place(crate, actor.global_position + Vector3(0, 0.65, -1.65))
+	actor.global_position = Vector3(-3, 0.01, 4)
+	place(crate, Vector3(-3, 0.65, 2.35))
 	await frames(15)
-	check(carry.lift(crate).ok, "Crate can be lifted for the pressure plate trial")
-	await travel(actor, Vector3.FORWARD, 58)
+	grab(actor, crate)
+	var tilted := Basis(Vector3.BACK, 0.33)
+	crate.global_transform = Transform3D(tilted, Vector3(-3, 1.05, 2.35))
+	aim(actor, Vector3(-3, 0.35, 2.35))
+	await frames(65)
+	check(placement.valid and crate.basis.y.dot(Vector3.UP) > tilted.y.dot(Vector3.UP) + 0.02,
+		"Shared floor contact rotates a tilted crate toward a supported face")
+	ui._input(escape)
+	check(not placement.is_grabbing() and not crate.freeze, "Escape restores dynamics for a suspended crate")
+
+	actor.global_position = plate.global_position + Vector3.UP * 0.01
+	place(crate, plate.global_position + Vector3(0, 0.65, 1.75))
+	await frames(12)
+	grab(actor, crate)
+	aim(actor, crate.position + Vector3.UP * 0.35)
 	await frames(30)
 	check(is_equal_approx(plate.measured_kg, actor.body_mass_kg + 35.0) and plate.is_active(),
-		"Carried mass transfers through Otis once")
-	check(carry.release().ok, "Release on the plate is safe")
-	await frames(85)
-	check(is_equal_approx(plate.measured_kg, actor.body_mass_kg),
-		"Once the crate is released outside the plate only chassis mass remains")
-	check(facility.barrier.state == PoweredBarrier.State.OPEN, "Effective chassis mass activates the unchanged gate")
+		"Suspended load transfers through Otis exactly once")
+	placement.release_drop(1300000)
+	await frames(100)
+	check(is_equal_approx(plate.measured_kg, actor.body_mass_kg)
+		and facility.barrier.state == PoweredBarrier.State.OPEN, "Released crate outside plate contributes no carried mass")
 
+	check(actor.equipment.pick_up(wrench).ok and actor.equipment.stow().ok
+		and actor.equipment.equip_first().ok, "Wrench pickup, storage and retrieval still work")
+	actor.camera.look_at(actor.camera.global_position + Vector3.FORWARD)
+	placement.press_drop(2000000)
+	placement.advance_drop(2350000)
+	placement.release_drop(2350000)
+	check(actor.equipment.placing and not placement.is_grabbing(), "Wrench placement persists after key-up")
+	placement.cancel()
+	check(actor.equipment.held_item() == wrench and not placement.is_active(), "Cancel returns the equipped wrench")
+	check(actor.equipment.drop().ok, "Wrench ordinary drop still works")
 	var terminal: TerminalWorkstation = facility.get_node("Terminal")
 	actor.global_position = Vector3(0, 0.01, -4.1)
 	actor.camera.look_at(terminal.global_position)
@@ -144,58 +193,53 @@ func run() -> void:
 		and chassis_values(actor.chassis) == same, "Terminal reentry and equipment activity do not reroll the chassis")
 	session.leave()
 	if DisplayServer.get_name() != "headless":
-		await check_walking(actor, crate)
+		actor.global_position = Vector3(-3, 0.01, 4)
+		place(crate, Vector3(-3, 0.65, 2.35))
+		await frames(15)
+		aim(actor, crate.global_position)
+		var event := InputEventAction.new()
+		event.action = "drop_item"
+		event.pressed = true
+		ui._input(event)
+		await create_timer(0.23).timeout
+		placement.advance_drop()
+		check(placement.is_grabbing(), "Gameplay G input routes into world grab")
+		event.pressed = false
+		ui._input(event)
+		check(not placement.is_grabbing() and not crate.freeze, "Gameplay G key-up restores physics")
 
 	facility.queue_free()
 	await process_frame
 	print("RD-006: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures else 0)
 
-func travel(actor: OtisController, direction: Vector3, count: int) -> void:
-	actor.set_physics_process(false)
-	for step in count:
-		await physics_frame
-		var request := direction * actor.movement_speed * actor.carry.speed_factor()
-		actor.move_and_collide(actor.carry.constrain_velocity(request, DT) * DT)
-		actor.carry.update_goal(DT)
-	actor.set_physics_process(true)
+func aim(actor: OtisController, point: Vector3) -> void:
+	actor.camera.look_at(point)
+	actor.placement.distance = minf(actor.placement.maximum_distance, actor.camera.global_position.distance_to(point))
+
+func grab(actor: OtisController, item: InteractableObject) -> void:
+	aim(actor, item.global_position)
+	actor.placement.press_drop(1000000)
+	actor.placement.advance_drop(1200000)
 
 func check_obstacle(actor: OtisController, crate: InteractableObject, start: Vector3,
 		direction: Vector3, boundary: float, label: String) -> void:
 	actor.global_position = start
-	actor.rotation.y = Vector3.FORWARD.signed_angle_to(direction, Vector3.UP)
-	place(crate, start + direction * 1.65 + Vector3.UP * 0.65)
-	await frames(18)
-	check(actor.carry.lift(crate).ok, "Lift succeeds near " + label)
-	await travel(actor, direction, 85)
-	var blocked_pose := crate.global_transform
-	var blocked_face := blocked_pose.origin.dot(direction) + 0.65
-	check(blocked_face <= boundary + 0.006 and blocked_face >= boundary - 0.09
-		and actor.global_position.dot(direction) < boundary - 0.30, "Crate and Otis stop at %s (face %.3f, actor %.3f)" % [label, blocked_face, actor.global_position.dot(direction)])
-	await travel(actor, direction, 15)
-	check(crate.global_position.distance_to(blocked_pose.origin) < 0.015, "Blocked carry stays stable at " + label)
-	await travel(actor, -direction, 28)
-	check(crate.global_position.dot(direction) < blocked_pose.origin.dot(direction) - 0.20,
-		"Retreat clears " + label)
-	var release_pose := crate.global_transform
-	check(actor.carry.release().ok and crate.global_transform == release_pose, "Release preserves clear pose near " + label)
-	await frames(18)
-
-func check_walking(actor: OtisController, crate: InteractableObject) -> void:
-	actor.global_position = Vector3(-3.5, 0.01, 2.8)
-	actor.rotation.y = 0.0
-	place(crate, Vector3(-3.5, 0.65, 1.15))
-	await frames(12)
-	check(actor.carry.lift(crate).ok, "Lift succeeds for WASD trial")
-	Input.action_press("move_forward")
-	await frames(24)
-	check(absf(actor.velocity.z + actor.movement_speed * actor.carry.speed_factor()) < 0.02,
-		"WASD uses the loaded walking speed")
-	Input.action_release("move_forward")
-	check(actor.carry.release().ok, "Release after WASD")
-	actor.global_position = Vector3(-4.9, 0.01, 3.8)
-	await frames(15)
-	Input.action_press("move_forward")
-	await frames(24)
-	check(absf(actor.velocity.z + actor.movement_speed) < 0.02, "WASD returns to chassis walking speed")
-	Input.action_release("move_forward")
+	place(crate, start + direction * 1.55 + Vector3.UP * 0.65)
+	await frames(16)
+	grab(actor, crate)
+	check(actor.placement.is_grabbing(), "Grab near " + label)
+	aim(actor, start + direction * 3.5 + Vector3.UP * 1.25)
+	actor.placement.rotating = true
+	await frames(70)
+	actor.placement.rotating = false
+	var blocked := crate.position.dot(direction) + 0.65
+	check(blocked <= boundary + 0.006 and blocked >= boundary - 0.10 and actor.placement.valid,
+		"Shared sweep stops at %s (face %.3f)" % [label, blocked])
+	aim(actor, start + direction * 1.6 + Vector3.UP * 1.1)
+	await frames(35)
+	check(crate.position.dot(direction) + 0.65 < blocked - 0.12, "Retreat clears " + label)
+	var pose := crate.global_transform
+	actor.placement.release_drop(1300000)
+	check(crate.global_transform == pose and not crate.freeze, "Release at safe pose near " + label)
+	await frames(20)

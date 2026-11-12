@@ -14,7 +14,6 @@ var acceleration: float:
 @export var interact_hold_threshold: float = 0.35
 var equipment: EquipmentController
 var manipulation: EnvironmentalManipulation
-var carry: LargeObjectCarry
 var knowledge := PlayerKnowledge.new()
 var controls_enabled: bool = true
 @onready var placement: PrecisionPlacement = $PrecisionPlacement
@@ -29,15 +28,12 @@ func _ready() -> void:
 	manipulation.name = "EnvironmentalManipulation"
 	add_child(manipulation)
 	manipulation.equipment_pose_requested.connect(equipment.presentation.request_pose)
-	carry = LargeObjectCarry.new()
-	carry.name = "LargeObjectCarry"
-	add_child(carry)
 
 func supporting_load_kg() -> float:
-	return body_mass_kg + carry.load_kg()
+	return body_mass_kg + placement.suspended_mass_kg()
 
 func controls_world_object() -> bool:
-	return manipulation.moving_object() != null or is_instance_valid(carry.item)
+	return manipulation.moving_object() != null or placement.is_grabbing()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
@@ -50,8 +46,8 @@ func _unhandled_input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	if manipulation.can_process():
 		manipulation.prepare_movement()
-	var speed := manipulation.effective_speed(movement_speed) * carry.speed_factor()
-	var movement_acceleration := manipulation.effective_acceleration(acceleration) * carry.acceleration_factor()
+	var speed := manipulation.effective_speed(movement_speed) * (1.0 - 0.25 * placement.load_fraction())
+	var movement_acceleration := manipulation.effective_acceleration(acceleration) * (1.0 - 0.30 * placement.load_fraction())
 	var direction := Vector3.ZERO
 	if controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var axis := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
@@ -67,9 +63,7 @@ func _physics_process(delta: float) -> void:
 	else:
 		velocity.y = 0
 	velocity = manipulation.constrain_velocity(velocity, delta)
-	velocity = carry.constrain_velocity(velocity, delta)
 	move_and_slide()
-	carry.update_goal(delta)
 	if manipulation.can_process():
 		manipulation.update_goal()
 

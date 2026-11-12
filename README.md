@@ -25,11 +25,11 @@ godot --path .
 | --- | --- |
 | WASD | Walk |
 | Mouse | Look |
-| E tap | Use the workstation or open an object context menu within 3 m. Release an active carry or crate manipulation. |
+| E tap | Use the workstation or open an object context menu within 3 m. Release an active Move interaction. |
 | Left click | Select a menu action; recapture mouse when no menu is open |
-| Escape | Close the terminal or context menu and resume. During placement, cancel. Release a carried load before releasing the mouse. |
+| Escape | Close the terminal or context menu and resume. Cancel placement or release a grabbed load. Otherwise, release the mouse. |
 | Hold E (0.35 s) | Stow the held item; never also triggers a tap |
-| G tap / hold | Tap to drop or confirm placement. Hold to enter precision placement. Releases an active carry or environmental manipulation. |
+| G tap / hold | Tap to drop or confirm handheld placement. Hold to place an equipped item, or to grab a targeted movable object with empty hands. Release G to let go of a world object. |
 | 1 | Retrieve the first stored item into the active slot |
 | F3 | Toggle developer diagnostics |
 
@@ -58,11 +58,12 @@ Each Facility session generates Otis's physical capabilities within manufacturin
 tolerances. See **Inventory → Unit Diagnostics** at the workstation for maximum
 lift, walking speed, acceleration, and chassis mass.
 
-Look at the storage crate, tap **E**, and select **Lift**. The crate stays
-in the world and follows Otis with swept collision checks. Tap **E**, **G**, or
-**Escape** to release it. **Move** still pushes or drags an object, regardless
-of whether Otis can lift it. The pressure plate measures a carried load through
-Otis's contact with the floor.
+Look at the storage crate with empty hands and hold **G**. The crate follows
+the camera using the same collision sweeps as precision placement. Scroll to
+adjust range, hold **R** to rotate, and use **Shift** to cycle axes. Release **G**
+or press **Escape** to let go. Loads above capacity use horizontal drag under
+gravity. The **E → Move** action remains available. The plate measures suspended
+weight through Otis's contact with the floor.
 
 ## Structure
 
@@ -86,7 +87,7 @@ for the same object without increasing the inspected-object count.
 To add an interactable, create an `ObjectDefinition` Resource with a stable,
 unique ID, attach it to an `InteractableObject` body, and supply collision and
 visual children. `properties` permits future world attributes. Resource action
-IDs drive the shared menu. `inspect`, `pick_up`, `lift` and `move` execute through the
+IDs drive the shared menu. `inspect`, `pick_up` and `move` execute through the
 service. The workstation's `use_terminal` action transfers camera and input
 ownership after the same range and sight check. Manipulation actions are
 derived from current instance mobility and state.

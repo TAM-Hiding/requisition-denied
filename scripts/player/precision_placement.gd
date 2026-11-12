@@ -1,6 +1,9 @@
 class_name PrecisionPlacement
 extends Node
-## Equipment owns the item throughout. This controller only drives its pose.
+## Both interaction lifecycles share the same camera-relative placement solver.
+signal grab_feedback(message: String)
+const GRAB_THRESHOLD_USEC := 200000
+const MIN_RESPONSE := 0.30
 @export_range(0.05, 2.0) var hold_seconds := 0.35
 @export var minimum_distance := 0.45
 @export var maximum_distance := 3.0
@@ -18,38 +21,73 @@ var valid := false
 var _pressed_at := -1
 var _hold_consumed := false
 var _angle := 0.0
+var _grab_candidate: InteractableObject
+var _grab: InteractableObject
+var _supported := false
 var _clearance: PlacementClearance
 @onready var actor: OtisController = get_parent() as OtisController
 
 func is_active() -> bool:
-	return actor.equipment.placing
+	return actor.equipment.placing or is_grabbing()
+
+func is_grabbing() -> bool:
+	return is_instance_valid(_grab)
+
+func is_supported_grab() -> bool:
+	return is_grabbing() and _supported
+
+func suspended_mass_kg() -> float:
+	return _grab.mass if is_grabbing() and not _supported else 0.0
+
+func load_fraction() -> float:
+	return clampf(suspended_mass_kg() / maxf(lift_capacity(), 0.001), 0.0, 1.0)
+
+func lift_capacity() -> float:
+	return actor.chassis.effective(AndroidChassis.Attribute.LIFT_KG)
+
+static func response_factor(mass_kg: float, capacity_kg: float) -> float:
+	return lerpf(1.0, MIN_RESPONSE, clampf(mass_kg / maxf(capacity_kg, 0.001), 0.0, 1.0))
 
 func press_drop(now: int = -1) -> void:
 	_pressed_at = Time.get_ticks_usec() if now < 0 else now
 	_hold_consumed = false
+	_grab_candidate = null
+	if not is_active() and actor.equipment.held_item() == null:
+		var target := actor.target_hit().get("collider") as InteractableObject
+		if is_instance_valid(target) and target.mobility() == ObjectDefinition.Mobility.MOVABLE:
+			_grab_candidate = target
 
 func advance_drop(now: int = -1) -> void:
 	if now < 0:
 		now = Time.get_ticks_usec()
-	if _pressed_at < 0 or _hold_consumed or now - _pressed_at < roundi(hold_seconds * 1000000.0):
+	var threshold := GRAB_THRESHOLD_USEC if is_instance_valid(_grab_candidate) else roundi(hold_seconds * 1000000.0)
+	if _pressed_at < 0 or _hold_consumed or now - _pressed_at < threshold:
 		return
 	_hold_consumed = true
-	if not is_active():
+	if is_instance_valid(_grab_candidate):
+		_begin_grab(_grab_candidate)
+	elif not is_active():
 		begin()
 
 func release_drop(now: int = -1) -> void:
+	if is_grabbing():
+		cancel()
+		return
 	if _pressed_at < 0:
 		return
-	advance_drop(now)
+	# A large object never starts a grab on the key-up event.
+	if not is_instance_valid(_grab_candidate):
+		advance_drop(now)
 	var tapped := not _hold_consumed
 	clear_gesture()
 	if tapped:
 		if is_active():
 			confirm()
-		else:
+		elif actor.equipment.held_item() != null:
 			actor.equipment.drop()
 
 func clear_gesture() -> void:
+	_grab_candidate = null
 	_pressed_at = -1
 	_hold_consumed = false
 
@@ -71,12 +109,75 @@ func begin() -> bool:
 	valid = false
 	return true
 
+func _begin_grab(item: InteractableObject) -> bool:
+	if (not actor.controls_enabled or actor.controls_world_object() or is_active()
+			or actor.equipment.held_item() != null or not is_instance_valid(item)
+			or item.mobility() != ObjectDefinition.Mobility.MOVABLE
+			or item.state != InteractableObject.State.WORLD or item.freeze
+			or actor.target_hit().get("collider") != item):
+		return false
+	var clearance := PlacementClearance.new()
+	var supported := item.mass > lift_capacity()
+	if not supported:
+		if not clearance.configure(item):
+			return false
+		var pose := item.global_transform
+		if not clearance.clear(pose):
+			# Grounded bodies can rest within the release margin. Sweep out
+			# of the contact before committing any state change.
+			var rise := PhysicsTestMotionParameters3D.new()
+			rise.from = pose
+			rise.motion = Vector3.UP * 0.012
+			pose.origin += rise.motion
+			if PhysicsServer3D.body_test_motion(item.get_rid(), rise) or not clearance.clear(pose):
+				grab_feedback.emit("There is not enough clearance to grab the load.")
+				return false
+		item.freeze = true
+		item.global_transform = pose
+		item.state = InteractableObject.State.CARRIED
+		item.support_carrier = actor
+		_clearance = clearance
+	else:
+		# The existing dynamic drag motor only drives the horizontal plane.
+		item.move_goal = item.global_position
+		item.move_velocity = Vector3.ZERO
+		item.move_speed_scale = MIN_RESPONSE
+		item.state = InteractableObject.State.MOVING
+		item.sleeping = false
+	_grab = item
+	_supported = supported
+	distance = clampf((item.global_position - actor.camera.global_position).dot(-actor.camera.global_basis.z),
+		minimum_distance, maximum_distance)
+	axis = 0
+	rotating = false
+	_angle = 0.0
+	valid = true
+	return true
+
+func _release_grab() -> void:
+	var item := _grab
+	_grab = null
+	item.state = InteractableObject.State.WORLD
+	item.support_carrier = null
+	item.move_speed_scale = 1.0
+	if _supported:
+		item.linear_velocity = Vector3(0, item.linear_velocity.y, 0)
+	else:
+		item.lock_rotation = false
+		item.freeze = false
+		item.linear_velocity = Vector3.ZERO
+		item.angular_velocity = Vector3.ZERO
+	item.sleeping = false
+	_supported = false
+
 func cancel() -> void:
 	clear_gesture()
 	rotating = false
 	_angle = 0.0
 	valid = false
-	if is_active():
+	if is_grabbing():
+		_release_grab()
+	elif actor.equipment.placing:
 		actor.equipment.cancel_placement()
 	_clearance = null
 
@@ -88,7 +189,10 @@ func adjust_distance(steps: float) -> void:
 	distance = clampf(distance + steps * wheel_step, minimum_distance, maximum_distance)
 
 func rotate_from_mouse(horizontal: float) -> void:
-	_angle = clampf(_angle + horizontal * rotation_speed, -PI, PI)
+	if is_supported_grab():
+		return
+	var response := response_factor(_grab.mass, lift_capacity()) if is_grabbing() else 1.0
+	_angle = clampf(_angle + horizontal * rotation_speed * response, -PI, PI)
 
 func _physics_process(delta: float) -> void:
 	if is_active():
@@ -98,19 +202,27 @@ func target_position() -> Vector3:
 	return actor.camera.global_position - actor.camera.global_basis.z * distance
 
 func update_preview(delta: float) -> void:
-	var item := actor.equipment.held_item()
+	if is_supported_grab():
+		var goal := target_position()
+		_grab.move_goal = Vector3(goal.x, _grab.global_position.y, goal.z)
+		return
+	var item := _grab if is_grabbing() else actor.equipment.held_item()
+	if is_grabbing() and item.mass > lift_capacity():
+		cancel()
+		return
+	var response := response_factor(item.mass, lift_capacity()) if is_grabbing() else 1.0
 	var pose := item.global_transform
-	var displacement := (target_position() - pose.origin) * (1.0 - exp(-follow_speed * delta))
+	var displacement := (target_position() - pose.origin) * (1.0 - exp(-follow_speed * response * delta))
 	# Let a preview that Otis has walked into escape along a clear world route.
 	# The displayed pose still has to clear Otis before it can be released.
-	var mask := 3 if _clearance.clear(pose) else 1
+	var mask := 3 if is_grabbing() or _clearance.clear(pose) else 1
 	pose = _clearance.slide(pose, displacement, mask)
 	if mask == 3 and not rotating and is_zero_approx(_angle):
 		pose = _clearance.accommodate_contact(pose, displacement)
 	for increment in 8:
 		if is_zero_approx(_angle):
 			break
-		var step := clampf(_angle, -0.035, 0.035)
+		var step := clampf(_angle, -0.035 * response, 0.035 * response)
 		_angle -= step
 		var candidate := pose
 		var orientation := pose.basis.orthonormalized() * Basis(AXES[axis], step)
@@ -124,7 +236,7 @@ func update_preview(delta: float) -> void:
 
 func confirm() -> bool:
 	var item := actor.equipment.held_item()
-	if not is_active() or item == null:
+	if not actor.equipment.placing or item == null:
 		return false
 	# Recheck current geometry at the input event, including moving barriers.
 	if not _clearance.clear(item.global_transform):
