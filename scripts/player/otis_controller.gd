@@ -1,15 +1,18 @@
 class_name OtisController
 extends CharacterBody3D
-@export_range(0.1, 300.0) var body_mass_kg := 80.0
-@export var movement_speed: float = 4.0
-@export var acceleration: float = 18.0
+var chassis := AndroidChassis.new()
+var body_mass_kg: float:
+	get: return chassis.effective(AndroidChassis.Attribute.MASS_KG)
+var movement_speed: float:
+	get: return chassis.effective(AndroidChassis.Attribute.WALK_MPS)
+var acceleration: float:
+	get: return chassis.effective(AndroidChassis.Attribute.ACCELERATION_MPS2)
 @export var mouse_sensitivity: float = 0.0025
 @export var camera_fov: float = 75.0
 @export var interaction_distance: float = 3.0
 @export var gravity: float = 9.8
 @export var interact_hold_threshold: float = 0.35
 var equipment: EquipmentController
-var manipulation: EnvironmentalManipulation
 var knowledge := PlayerKnowledge.new()
 var controls_enabled: bool = true
 @onready var placement: PrecisionPlacement = $PrecisionPlacement
@@ -20,24 +23,22 @@ func _ready() -> void:
 	equipment = EquipmentController.new()
 	equipment.name = "Equipment"
 	add_child(equipment)
-	manipulation = EnvironmentalManipulation.new()
-	manipulation.name = "EnvironmentalManipulation"
-	add_child(manipulation)
-	manipulation.equipment_pose_requested.connect(equipment.presentation.request_pose)
+
+func supporting_load_kg() -> float:
+	return body_mass_kg + placement.suspended_mass_kg()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if placement.is_active() and placement.rotating:
-			placement.rotate_from_mouse(event.relative.x)
+			placement.rotate_from_mouse(event.relative)
+			get_viewport().set_input_as_handled()
 			return
 		rotate_y(-event.relative.x * mouse_sensitivity)
 		camera.rotation.x = clampf(camera.rotation.x - event.relative.y * mouse_sensitivity, -1.5, 1.5)
 
 func _physics_process(delta: float) -> void:
-	if manipulation.can_process():
-		manipulation.prepare_movement()
-	var speed := manipulation.effective_speed(movement_speed)
-	var movement_acceleration := manipulation.effective_acceleration(acceleration)
+	var speed := movement_speed * (1.0 - 0.25 * placement.load_fraction())
+	var movement_acceleration := acceleration * (1.0 - 0.30 * placement.load_fraction())
 	var direction := Vector3.ZERO
 	if controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var axis := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
@@ -52,10 +53,7 @@ func _physics_process(delta: float) -> void:
 		velocity.y -= gravity * delta
 	else:
 		velocity.y = 0
-	velocity = manipulation.constrain_velocity(velocity, delta)
 	move_and_slide()
-	if manipulation.can_process():
-		manipulation.update_goal()
 
 func target_hit() -> Dictionary:
 	var query := PhysicsRayQueryParameters3D.create(camera.global_position,

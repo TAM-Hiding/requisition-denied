@@ -22,9 +22,11 @@ func request(action: StringName, actor: Node3D, camera: Camera3D,
 	if action in [&"pick_up", &"move"]:
 		if not actor is OtisController:
 			return {"ok": false, "message": "Actor has no equipment controller."}
+		if actor.placement.is_active():
+			return {"ok": false, "message": "Place or cancel the current object first."}
 		if action == &"pick_up":
 			return actor.equipment.pick_up(target)
-		return actor.manipulation.begin_move(target)
+		return {"ok": true} if actor.placement.begin_world(target) else {"ok": false, "message": "Cannot move this object from here."}
 	if action != &"inspect":
 		return {"ok": false, "message": "Action unavailable."}
 	if knowledge == null:
@@ -36,9 +38,10 @@ func request(action: StringName, actor: Node3D, camera: Camera3D,
 func request_actor_action(action: StringName, actor: OtisController) -> Dictionary:
 	if not is_instance_valid(actor) or actor.equipment == null or not actor.controls_enabled:
 		return {"ok": false, "message": "Equipment unavailable."}
+	if actor.placement.is_active():
+		return {"ok": false, "message": "Place or cancel the current object first."}
 	match action:
 		&"stow": return actor.equipment.stow()
 		&"equip_first": return actor.equipment.equip_first()
 		&"drop": return actor.equipment.drop()
-		&"stop_move": return actor.manipulation.stop_move()
 	return {"ok": false, "message": "Action unavailable."}

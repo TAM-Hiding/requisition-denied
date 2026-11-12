@@ -41,15 +41,22 @@ func _physics_process(delta: float) -> void:
 
 func load_mass(body: Node3D) -> float:
 	if body is OtisController:
-		return body.body_mass_kg if body.is_on_floor() else 0.0
+		# The supported load is transmitted through Otis. The frozen carried
+		# body contributes nothing independently even if it overlaps the plate.
+		return body.supporting_load_kg() if body.is_on_floor() else 0.0
 	if body is RigidBody3D and not body.freeze and absf(body.linear_velocity.y) < 0.2:
 		return body.mass
 	return 0.0
 
 func reaches_plate(body: Node3D, supports: Dictionary) -> bool:
 	var visited := {}
-	while is_instance_valid(body) and not visited.has(body) and load_mass(body) > 0:
+	while is_instance_valid(body) and not visited.has(body):
 		visited[body] = true
+		if body is InteractableObject and body.state == InteractableObject.State.CARRIED:
+			body = body.support_carrier
+			continue
+		if load_mass(body) <= 0.0:
+			return false
 		if not supports.has(body):
 			supports[body] = support_under(body)
 		body = supports[body]

@@ -25,11 +25,13 @@ godot --path .
 | --- | --- |
 | WASD | Walk |
 | Mouse | Look |
-| E tap | Use the workstation or open an object context menu within 3 m. Release an active crate manipulation. |
+| Middle mouse + drag | Rotate the object during precision manipulation |
+| Mouse wheel | Adjust placement distance during precision manipulation |
+| E tap | Use the workstation or open an object context menu within 3 m. Choose Move to start precision manipulation. |
 | Left click | Select a menu action; recapture mouse when no menu is open |
-| Escape | Close the terminal or context menu and resume. During placement, cancel. Otherwise, release the mouse. |
+| Escape | Close the terminal or context menu and resume. Cancel placement or release a grabbed load. Otherwise, release the mouse. |
 | Hold E (0.35 s) | Stow the held item; never also triggers a tap |
-| G tap / hold | Tap to drop or confirm placement. Hold to enter precision placement. Releases active environmental manipulation. |
+| G tap / hold | Hold for 0.2 s to manipulate an equipped item or a targeted movable object. Release the hold to keep manipulating. Tap G to place, or to drop ordinary equipment when idle. |
 | 1 | Retrieve the first stored item into the active slot |
 | F3 | Toggle developer diagnostics |
 
@@ -48,9 +50,23 @@ world physics continues.
 - **Messages** shows authored notices and tracks read state.
 - **Requisitions** records deterministic decisions for the current session.
   Approvals do not deliver equipment or change access.
-- **Inventory** displays Otis's equipped item, stored items, and storage capacity.
+- **Inventory** displays equipment, storage capacity, and Otis's chassis diagnostics.
 - **Records** displays what Otis has learned through inspection.
 - **Settings** controls CRT text brightness for the current session.
+
+## Chassis and carrying
+
+Each Facility session generates Otis's physical capabilities within manufacturing
+tolerances. See **Inventory → Unit Diagnostics** at the workstation for maximum
+lift, walking speed, acceleration, and chassis mass.
+
+Look at the storage crate with empty hands, hold **G** for 0.2 seconds, then
+release the key. **E → Move** enters the same mode. Scroll to adjust range, hold
+**middle mouse** and drag to rotate. Tap **G** to place or press
+**Escape** to release the world object. The same hold activates persistent
+placement for equipped items, which return to equipment on Escape. Overweight
+objects drag horizontally under gravity. The plate measures suspended weight
+through Otis's contact with the floor.
 
 ## Structure
 
@@ -60,8 +76,8 @@ world physics continues.
 - `data/objects/`: crate, generator, terminal and wrench definitions and their action lists.
 - `scripts/actions/interaction_service.gd`: action permission and execution gate.
 - `scripts/knowledge/player_knowledge.gd`: per-actor learned snapshots, independent of world Resources.
-- `scripts/player/`: locomotion, equipment owner, independent environmental manipulation,
-  and held-item occupancy/presentation profiles with independent NORMAL/LOWERED poses.
+- `scripts/player/`: chassis, locomotion, equipment, shared precision manipulation, supported drag,
+  and the NORMAL/LOWERED presentation poses for handheld items.
 - `scripts/ui/`: contextual HUD, terminal camera and input ownership, and the in-world terminal display.
 - `scripts/administration/`: Facility-owned messages, requisition records and administrative events.
 - `tests/`: engine-level validation and startup smoke test.
@@ -79,8 +95,8 @@ service. The workstation's `use_terminal` action transfers camera and input
 ownership after the same range and sight check. Manipulation actions are
 derived from current instance mobility and state.
 
-Otis's scene exposes movement speed, acceleration, mouse sensitivity, FOV,
-gravity, interaction reach and the E hold threshold. Rendering uses Compatibility mode for a modest
+The chassis supplies walking speed and acceleration. Otis's scene exposes mouse
+sensitivity, FOV, gravity, interaction reach, and the E hold threshold. Rendering uses Compatibility mode for a modest
 hardware baseline; lighting is deliberately simple.
 
 ## Validation

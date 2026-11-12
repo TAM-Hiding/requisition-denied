@@ -222,6 +222,9 @@ func _show_inventory() -> void:
 	detail.text = "PERSONNEL EQUIPMENT RECORD / OTIS\n\nEQUIPPED\n%s\n\nSTORED  %d / %d\n%s" % [
 		held.definition.display_name if held != null else "None", stored.size(), actor.equipment.storage_capacity,
 		"\n".join(names) if not names.is_empty() else "None"]
+	detail.text += "\n\nOTIS / UNIT DIAGNOSTICS\n\nCHASSIS CONFIGURATION  STANDARD\nMAXIMUM LIFT  %.2f kg\nWALK SPEED    %.2f m/s\nACCELERATION  %.2f m/s²\nCHASSIS MASS  %.2f kg\n\nSTATUS  OPERATIONAL" % [
+		actor.chassis.effective(AndroidChassis.Attribute.LIFT_KG), actor.movement_speed,
+		actor.acceleration, actor.body_mass_kg]
 
 func _set_brightness(value: float) -> void:
 	session.text_brightness = value

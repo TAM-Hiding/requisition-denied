@@ -1,12 +1,13 @@
 class_name InteractableObject
 extends RigidBody3D
 ## Runtime body. Definitions describe the object; state belongs to this instance.
-enum State { WORLD, HELD, STOWED, MOVING }
+enum State { WORLD, HELD, STOWED, MOVING, CARRIED }
 @export var definition: ObjectDefinition
 var state: State = State.WORLD
+var support_carrier: CharacterBody3D
 var _mobility_override: int = -1
 var move_goal: Vector3
-var move_velocity: Vector3
+var move_speed_scale := 1.0
 @export var move_speed: float = 2.5
 @export var move_acceleration: float = 20.0
 
@@ -47,11 +48,12 @@ func query_actions() -> Array[StringName]:
 		return actions
 	# Manipulation actions are derived, never trusted from static definition lists.
 	for action in definition.available_actions:
-		if action not in [&"pick_up", &"move", &"stow"]:
+		if action not in [&"pick_up", &"move", &"stow", &"lift"]:
 			actions.append(action)
 	if state == State.WORLD:
 		if mobility() == ObjectDefinition.Mobility.CARRYABLE:
 			actions.append(&"pick_up")
+			actions.append(&"move")
 		elif mobility() == ObjectDefinition.Mobility.MOVABLE:
 			actions.append(&"move")
 	return actions
@@ -61,7 +63,7 @@ func _integrate_forces(body: PhysicsDirectBodyState3D) -> void:
 		return
 	var error := move_goal - body.transform.origin
 	error.y = 0
-	var desired := (move_velocity + error * 4.0).limit_length(move_speed)
+	var desired := (error * 4.0).limit_length(move_speed * move_speed_scale)
 	var horizontal := Vector3(body.linear_velocity.x, 0, body.linear_velocity.z)
 	horizontal = horizontal.move_toward(desired, move_acceleration * body.step)
 	body.linear_velocity = Vector3(horizontal.x, body.linear_velocity.y, horizontal.z)

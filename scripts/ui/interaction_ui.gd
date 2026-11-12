@@ -28,7 +28,7 @@ func _ready() -> void:
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(hud)
 	var heading := Label.new()
-	heading.text = "REQUISITION DENIED   /   RD–005"
+	heading.text = "REQUISITION DENIED   /   RD–006"
 	heading.position = Vector2(24, 18)
 	hud.add_child(heading)
 	help = Label.new()
@@ -87,7 +87,7 @@ func _ready() -> void:
 	status.position += Vector2(24, -76)
 	hud.add_child(status)
 	otis.equipment.feedback.connect(show_feedback)
-	otis.manipulation.feedback.connect(show_feedback)
+	otis.placement.grab_feedback.connect(show_feedback)
 	panel.hide()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
@@ -96,15 +96,22 @@ func _physics_process(delta: float) -> void:
 		return
 	var placing := otis.placement.is_active()
 	if placing:
-		help.text = "Wheel Range  •  Hold R Rotate  •  Shift Axis  •  G Place  •  Esc Cancel"
+		help.text = "Wheel Range  •  G Place  •  Esc Cancel"
+		if not otis.placement.is_supported_grab():
+			help.text += "  •  Hold Middle Mouse Rotate"
 	else:
-		help.text = "WASD Move  •  E Context / release  •  Hold E Stow  •  1 Equip  •  G Drop / hold to place  •  Esc Cursor  •  F3 Debug"
-	status.visible = not placing
+		help.text = "WASD Move  •  E Context  •  Hold E Stow  •  1 Equip  •  G Drop / hold to place or grab  •  Esc Cursor  •  F3 Debug"
+	status.visible = not placing or not otis.placement.valid
 	advance_hold(delta)
 	if gameplay_input_allowed():
 		otis.placement.advance_drop()
 	else:
-		otis.placement.clear_gesture()
+		if otis.placement.is_grabbing():
+			otis.placement.cancel()
+		else:
+			otis.placement.clear_gesture()
+			if otis.placement.rotating:
+				otis.placement.set_rotating(false)
 	feedback_time = maxf(0, feedback_time - delta)
 	if feedback_time == 0:
 		status.text = ""
@@ -125,12 +132,12 @@ func _physics_process(delta: float) -> void:
 		prompt.text = ""
 	elif Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		prompt.text = "Left-click to resume"
-	elif otis.placement.is_active():
+	elif otis.placement.is_supported_grab():
+		prompt.text = "SUPPORTED GRAB"
+	elif placing:
 		var placement := otis.placement
-		prompt.text = "PLACEMENT  |  ROTATION %s  |  %s" % [
-			PrecisionPlacement.AXIS_NAMES[placement.axis], "CLEAR" if placement.valid else "BLOCKED"]
-	elif otis.manipulation.moving_object() != null:
-		prompt.text = "[E] Release object"
+		prompt.text = "%s  |  %s" % [
+			"ROTATING" if placement.rotating else "PLACEMENT", "CLEAR" if placement.valid else "BLOCKED"]
 	elif target != null:
 		prompt.text = "[E]  " + target.definition.display_name
 	else:
@@ -151,10 +158,11 @@ func _physics_process(delta: float) -> void:
 		target.mobility_name() if target != null else "—",
 		target.state_name() if target != null else "—",
 		held.definition.object_id if held != null else &"none",
-		otis.equipment.stored_items().size(), str(otis.manipulation.moving_object() != null)]
+		otis.equipment.stored_items().size(), str(otis.placement.is_grabbing())]
 	debug_label.text += "\nEQUIPMENT STATE  " + ("HELD" if held != null else ("STOWED" if not otis.equipment.stored_items().is_empty() else "EMPTY"))
 
-	debug_label.text += "\nHELD OBSTRUCTED  %s\nMOVEMENT LIMIT  %.2f m/s" % [str(otis.equipment.presentation.obstructed), otis.manipulation.effective_speed(otis.movement_speed)]
+	debug_label.text += "\nHELD OBSTRUCTED  %s\nMOVEMENT LIMIT  %.2f m/s" % [
+		str(otis.equipment.presentation.obstructed), otis.movement_speed * (1.0 - 0.25 * otis.placement.load_fraction())]
 
 	debug_label.text += "\nEQUIPMENT POSE  " + HeldItemPresentation.Pose.keys()[otis.equipment.presentation.requested_pose]
 
@@ -184,19 +192,14 @@ func _input(event: InputEvent) -> void:
 		elif menu_open:
 			close_menu()
 		else:
-			if otis.manipulation.moving_object() != null:
-				service.request_actor_action(&"stop_move", otis)
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("drop_item") and gameplay_input_allowed():
 		cancel_hold()
-		if otis.manipulation.moving_object() != null:
-			service.request_actor_action(&"stop_move", otis)
-		else:
-			otis.placement.press_drop()
+		otis.placement.press_drop()
 		get_viewport().set_input_as_handled()
 	elif event.is_action_released("drop_item"):
-		if gameplay_input_allowed():
+		if gameplay_input_allowed() or otis.placement.is_grabbing():
 			otis.placement.release_drop()
 		else:
 			otis.placement.clear_gesture()
@@ -210,9 +213,7 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 	elif event.is_action_released("interact"):
 		if e_pending and not e_consumed and gameplay_input_allowed():
-			if otis.manipulation.moving_object() != null:
-				service.request_actor_action(&"stop_move", otis)
-			elif not (terminal.is_target(target) and terminal.enter()):
+			if not (terminal.is_target(target) and terminal.enter()):
 				open_menu(target)
 		cancel_hold()
 		get_viewport().set_input_as_handled()
@@ -227,14 +228,14 @@ func _input(event: InputEvent) -> void:
 func handle_placement_controls(event: InputEvent) -> bool:
 	if event.is_action("interact") or event.is_action("equip_first"):
 		return true
-	if event is InputEventKey:
-		if event.physical_keycode == KEY_R:
-			otis.placement.rotating = event.pressed
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_MIDDLE:
+			if otis.placement.is_supported_grab():
+				return false
+			otis.placement.set_rotating(event.pressed)
 			return true
-		if event.physical_keycode == KEY_SHIFT and event.pressed:
-			otis.placement.cycle_axis()
-			return true
-	if event is InputEventMouseButton and event.pressed:
+		if not event.pressed:
+			return false
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			otis.placement.adjust_distance(1)
 			return true
@@ -264,16 +265,18 @@ func advance_hold(delta: float) -> void:
 	e_elapsed += delta
 	if e_elapsed >= otis.interact_hold_threshold:
 		e_consumed = true
-		service.request_actor_action(&"stow", otis)
+		if not otis.placement.is_grabbing():
+			service.request_actor_action(&"stow", otis)
 
 func show_feedback(message: String) -> void:
 	status.text = message
 	feedback_time = 3.5
 
 func open_menu(object: InteractableObject) -> void:
-	if not service.permitted(otis, otis.camera, object, otis.interaction_distance):
+	if otis.placement.is_active() or not service.permitted(otis, otis.camera, object, otis.interaction_distance):
 		return
 	cancel_hold()
+	otis.placement.clear_gesture()
 	menu_target = object
 	menu_open = true
 	otis.controls_enabled = false
@@ -325,8 +328,8 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		if is_instance_valid(otis) and is_instance_valid(otis.placement):
 			otis.placement.clear_gesture()
-			otis.placement.rotating = false
+			otis.placement.set_rotating(false)
 		cancel_hold()
-		if is_instance_valid(otis) and otis.equipment != null and otis.manipulation.moving_object() != null:
-			otis.manipulation.stop_move()
+		if is_instance_valid(otis) and is_instance_valid(otis.placement) and otis.placement.is_grabbing():
+			otis.placement.cancel()
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE

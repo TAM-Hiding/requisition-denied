@@ -10,7 +10,11 @@ var terminal_session: TerminalInteraction
 var _barrier_was_blocked := false
 
 
+## A null seed uses new manufacturing variance on every Facility instance.
+var chassis_seed: Variant = null
+
 func _ready() -> void:
+	$Otis.chassis = AndroidChassis.generate(randi() if chassis_seed == null else int(chassis_seed))
 	var floor_mat := material(Color("343f46"))
 	var wall_mat := material(Color("697579"))
 	var dark := material(Color("202c33"))
