@@ -9,6 +9,9 @@ extends Resource
 ## Optional insertion reach along the mount's local +Z approach.
 @export_range(0.0, 0.5) var approach_distance := 0.0
 @export_range(0.1, 45.0) var angle_tolerance_degrees := 10.0
+## A keyed mount uses the mating datum's +Z approach and +X roll reference.
+@export var keyed := false
+@export_range(1.0, 75.0) var key_tolerance_degrees := 35.0
 @export var requires_vacant: Array[StringName] = []
 @export var removable := true
 @export var required_for_operation := false

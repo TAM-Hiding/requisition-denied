@@ -3,6 +3,7 @@ extends Node3D
 ## A fixed attachment retains the original live body and its children.
 @export var definition: MountDefinition
 var occupant: MechanicalComponent
+var pending: MechanicalComponent
 
 func _ready() -> void:
 	if definition != null:
@@ -20,10 +21,14 @@ func access_blocker() -> StringName:
 func compatibility_error(component: MechanicalComponent) -> String:
 	if not is_instance_valid(component) or component.is_ancestor_of(self) or is_instance_valid(component.installed_mount):
 		return "Component cannot attach here."
+	if is_instance_valid(component.seating_mount) and component.seating_mount != self:
+		return "Component is seating at another mount."
 	if component.state not in [InteractableObject.State.WORLD, InteractableObject.State.CARRIED]:
 		return "Component is controlled by another interaction."
 	if is_instance_valid(occupant):
 		return "Mount occupied."
+	if is_instance_valid(pending) and pending != component:
+		return "Mount reserved for installation."
 	if definition.connection == null or definition.connection.kind != MechanicalConnection.Kind.FIXED:
 		return "This connection type is not simulated."
 	if component.profile != null:
@@ -37,51 +42,91 @@ func mating_distance_squared(component: MechanicalComponent) -> float:
 		return INF
 	return (component.global_transform * component.profile.mating_transform).origin.distance_squared_to(global_position)
 
-func can_acquire(component: MechanicalComponent, gap_squared: float) -> bool:
-	var radius := maxf(definition.acquisition_distance, Vector2(definition.approach_distance, definition.position_tolerance).length())
+func can_acquire(component: MechanicalComponent, gap_squared: float, tuning: Dictionary = {}) -> bool:
+	var radius: float = tuning.get("acquisition_distance_m", definition.acquisition_distance)
 	return gap_squared <= radius * radius and compatibility_error(component).is_empty() and access_blocker() == &""
 
-func alignment_error(component: MechanicalComponent) -> String:
+func alignment(component: MechanicalComponent, tuning: Dictionary = {}) -> Dictionary:
 	var issue := compatibility_error(component)
 	if not issue.is_empty():
-		return issue
-	var blocker := access_blocker()
-	if blocker != &"":
-		return "Clear %s first." % blocker
+		return {"distance": INF, "axis": INF, "key": INF, "issue": issue}
 	var datum := component.global_transform * component.profile.mating_transform
 	var offset := to_local(datum.origin)
-	var tolerance := definition.position_tolerance
-	if offset.length_squared() > tolerance * tolerance:
-		if offset.z <= 0.0 or offset.z > definition.approach_distance:
-			return "Move closer to the mount."
-		if Vector2(offset.x, offset.y).length_squared() > tolerance * tolerance:
-			return "Center the component on the mount."
-	if _angle_from(datum) > deg_to_rad(definition.angle_tolerance_degrees):
-		return "Align the component with the mount."
-	return ""
+	var datum_basis := datum.basis.orthonormalized()
+	var socket_basis := global_basis.orthonormalized()
+	var axis_error := rad_to_deg(datum_basis.z.angle_to(socket_basis.z))
+	var key_error := 180.0
+	if axis_error < 179.9:
+		var corrected_key := Quaternion(datum_basis.z, socket_basis.z) * datum_basis.x
+		key_error = rad_to_deg(corrected_key.angle_to(socket_basis.x))
+	var snap: float = tuning.get("snap_distance_m", definition.position_tolerance)
+	var axis_tolerance: float = tuning.get("axis_tolerance_degrees", definition.angle_tolerance_degrees)
+	var key_tolerance: float = tuning.get("key_rotation_tolerance_degrees", definition.key_tolerance_degrees)
+	var blocker := access_blocker()
+	if blocker != &"":
+		issue = "Clear %s first." % blocker
+	elif offset.length() > snap and (offset.z <= 0.0 or offset.z > definition.approach_distance
+			or Vector2(offset.x, offset.y).length() > minf(snap, definition.position_tolerance)):
+		issue = "Move closer to the mount."
+	elif definition.keyed and axis_error > axis_tolerance:
+		issue = "Align the insertion axis."
+	elif definition.keyed and key_error > key_tolerance:
+		issue = "Rotate to align the key."
+	elif not definition.keyed and rad_to_deg(_angle_from(datum)) > axis_tolerance:
+		issue = "Align the component with the mount."
+	return {"distance": offset.length(), "axis": axis_error, "key": key_error, "issue": issue}
 
-func installation_error(component: MechanicalComponent) -> String:
-	var issue := alignment_error(component)
+func seating_path(component: MechanicalComponent, clearance: PlacementClearance) -> Array[Transform3D]:
+	var pose := component.global_transform
+	var seat := global_transform * component.profile.mating_transform.affine_inverse()
+	var aligned := Transform3D(seat.basis, pose.origin)
+	if not clearance.clear(pose) or not clearance.turn_path_clear(pose, aligned):
+		return []
+	if not clearance.translation_path_clear(aligned, seat):
+		return []
+	return [pose, aligned, seat]
+
+func installation_error(component: MechanicalComponent, tuning: Dictionary = {}) -> String:
+	var issue: String = alignment(component, tuning).issue
 	if not issue.is_empty():
 		return issue
 	var clearance := PlacementClearance.new()
-	var pose := component.global_transform
-	var destination := global_transform * component.profile.mating_transform.affine_inverse()
-	var aligned := Transform3D(destination.basis, pose.origin)
-	var motion := destination.origin - pose.origin
-	var turn := pose.basis.orthonormalized().get_rotation_quaternion().angle_to(
-		destination.basis.orthonormalized().get_rotation_quaternion())
-	if (not clearance.configure(component) or not clearance.clear(pose)
-			or not clearance.rotation_clear(pose, aligned, turn)
-			or not clearance.slide(aligned, motion).origin.is_equal_approx(destination.origin)):
+	if not clearance.configure(component) or seating_path(component, clearance).is_empty():
 		return "Installation path blocked."
 	return ""
 
 func install(component: MechanicalComponent) -> String:
+	if is_instance_valid(pending):
+		return "Installation in progress."
 	var issue := installation_error(component)
 	if issue.is_empty():
 		_attach(component)
 	return issue
+
+func reserve(component: MechanicalComponent) -> bool:
+	if is_instance_valid(pending) or not compatibility_error(component).is_empty() or access_blocker() != &"":
+		return false
+	pending = component
+	component.seating_mount = self
+	return true
+
+func finish_seating(component: MechanicalComponent) -> bool:
+	if pending != component or not compatibility_error(component).is_empty() or access_blocker() != &"":
+		return false
+	if not (component.global_transform * component.profile.mating_transform).is_equal_approx(global_transform):
+		return false
+	cancel_seating(component)
+	_attach(component)
+	return true
+
+func cancel_seating(component: MechanicalComponent) -> void:
+	if pending == component:
+		pending = null
+		if is_instance_valid(component):
+			component.seating_mount = null
+
+func _exit_tree() -> void:
+	cancel_seating(pending)
 
 ## Scene-authored components may start attached before their first physics tick.
 func seed(component: MechanicalComponent) -> bool:

@@ -24,9 +24,16 @@ var _hold_consumed := false
 var _trackball_cursor := Vector2.ZERO
 var _pending_turns: Array[Quaternion] = []
 var pickup_debug := false
+var mechanical_settings := MechanicalInteractionSettings.new()
+var _seating_socket: MechanicalMount
+var _seating_path: Array[Transform3D] = []
+var _seating_elapsed := 0.0
+var _seating_duration := 0.0
+var _seating_turn_fraction := 0.0
 var _grab_candidate: InteractableObject
 var _grab: InteractableObject
 var _supported := false
+var _resting_pickup := false
 var input_suspended := false
 var _clearance: PlacementClearance
 @onready var actor: OtisController = get_parent() as OtisController
@@ -57,7 +64,7 @@ static func response_factor(mass_kg: float, capacity_kg: float) -> float:
 	return lerpf(1.0, MIN_RESPONSE, clampf(mass_kg / maxf(capacity_kg, 0.001), 0.0, 1.0))
 
 func press_drop(now: int = -1) -> void:
-	if input_suspended:
+	if input_suspended or is_seating():
 		return
 	_pressed_at = Time.get_ticks_usec() if now < 0 else now
 	_hold_consumed = false
@@ -122,8 +129,11 @@ func begin_world(item: InteractableObject) -> bool:
 	if not supported:
 		if not clearance.configure(item):
 			return false
-		var pose := clearance.pickup_pose(item.global_transform, pickup_debug)
-		if not clearance.clear(pose):
+		var pose := clearance.pickup_pose(item.global_transform, pickup_debug,
+			actor.camera.global_position - item.global_position)
+		_resting_pickup = not clearance.clear(pose)
+		if _resting_pickup and not clearance.physically_clear(pose):
+			_resting_pickup = false
 			grab_feedback.emit("The load has no clear pickup path.")
 			return false
 		item.freeze = true
@@ -143,7 +153,7 @@ func begin_world(item: InteractableObject) -> bool:
 	distance = clampf((item.global_position - actor.camera.global_position).dot(-actor.camera.global_basis.z),
 		minimum_distance, maximum_distance)
 	set_rotating(false)
-	valid = true
+	valid = not _resting_pickup
 	return true
 
 func _release_grab() -> void:
@@ -161,9 +171,11 @@ func _release_grab() -> void:
 		item.angular_velocity = Vector3.ZERO
 	item.sleeping = false
 	_supported = false
+	_resting_pickup = false
 	actor.equipment.presentation.request_pose(HeldItemPresentation.Pose.NORMAL)
 
 func cancel() -> void:
+	clear_seating()
 	clear_gesture()
 	set_rotating(false)
 	valid = false
@@ -174,7 +186,7 @@ func cancel() -> void:
 	_clearance = null
 
 func set_rotating(enabled: bool) -> void:
-	rotating = enabled and not input_suspended and is_active() and not is_supported_grab()
+	rotating = enabled and not input_suspended and is_active() and not is_supported_grab() and not is_seating()
 	_trackball_cursor = Vector2.ZERO
 	_pending_turns.clear()
 
@@ -220,13 +232,16 @@ func set_input_suspended(suspended: bool) -> void:
 			_grab.linear_velocity = Vector3.UP * _grab.linear_velocity.y
 
 func _physics_process(delta: float) -> void:
-	if is_active() and not input_suspended:
+	if (is_active() or is_seating()) and not input_suspended:
 		update_preview(delta)
 
 func target_position() -> Vector3:
 	return actor.camera.global_position - actor.camera.global_basis.z * distance
 
 func update_preview(delta: float) -> void:
+	if is_seating():
+		advance_seating(delta)
+		return
 	if is_supported_grab():
 		var goal := target_position()
 		_grab.move_goal = Vector3(goal.x, _grab.global_position.y, goal.z)
@@ -238,6 +253,13 @@ func update_preview(delta: float) -> void:
 	var response := response_factor(item.mass, lift_capacity())
 	var pose := item.global_transform
 	var displacement := (target_position() - pose.origin) * (1.0 - exp(-follow_speed * response * delta))
+	if _resting_pickup:
+		if not _clearance.clear(pose):
+			pose = _clearance.depart_resting_pose(pose, displacement)
+			item.global_transform = pose
+		valid = _clearance.clear(pose)
+		_resting_pickup = not valid
+		return
 	# Let a preview that Otis has walked into escape along a clear world route.
 	# The displayed pose still has to clear Otis before it can be released.
 	var mask := 3 if is_grabbing() or _clearance.clear(pose) else 1
@@ -269,38 +291,115 @@ func update_preview(delta: float) -> void:
 	valid = _clearance.clear(pose)
 
 func installation_candidate() -> MechanicalMount:
-	if input_suspended or not is_grabbing() or not _grab is MechanicalComponent or _supported:
+	if input_suspended or is_seating() or not is_grabbing() or not _grab is MechanicalComponent or _supported:
 		return null
 	var closest: MechanicalMount
 	var best_distance := INF
 	for node in get_tree().get_nodes_in_group(&"mechanical_mounts"):
 		var socket := node as MechanicalMount
 		var gap := socket.mating_distance_squared(_grab)
-		if gap < best_distance and socket.can_acquire(_grab, gap):
+		if gap < best_distance and socket.can_acquire(_grab, gap, mechanical_settings.values.installation):
 			closest = socket
 			best_distance = gap
 	return closest
 
+func installation_name() -> String:
+	return _grab.definition.display_name
+
 func installation_feedback(socket: MechanicalMount) -> String:
-	return socket.installation_error(_grab)
+	return socket.installation_error(_grab, mechanical_settings.values.installation)
+
+func alignment_diagnostics(socket: MechanicalMount, issue: String) -> String:
+	var errors := socket.alignment(_grab, mechanical_settings.values.installation)
+	var clearance := "CLEAR" if issue.is_empty() else "BLOCKED" if errors.issue.is_empty() else "NOT CHECKED"
+	return "\nMOUNT  %s  %.3f m  AXIS %.1f°  KEY %.1f°\nPATH %s  ELIGIBLE %s" % [
+		socket.definition.mount_id, errors.distance, errors.axis, errors.key, clearance, issue.is_empty()]
+
+func is_seating() -> bool:
+	return not _seating_path.is_empty()
 
 func install_grab() -> bool:
+	if is_seating():
+		return false
 	var socket := installation_candidate()
 	if socket == null:
 		grab_feedback.emit("Align with a clear compatible mount first.")
 		return false
-	var issue := socket.install(_grab)
+	var tuning: Dictionary = mechanical_settings.values.installation
+	var issue: String = socket.alignment(_grab, tuning).issue
 	if not issue.is_empty():
 		grab_feedback.emit(issue)
 		return false
-	_grab = null
-	actor.equipment.presentation.request_pose(HeldItemPresentation.Pose.NORMAL)
-	cancel()
-	grab_feedback.emit("Installed at %s." % socket.definition.mount_id)
+	var path := socket.seating_path(_grab, _clearance)
+	if path.is_empty():
+		grab_feedback.emit("Installation path blocked.")
+		return false
+	if not socket.reserve(_grab):
+		grab_feedback.emit("Mount no longer available.")
+		return false
+	set_rotating(false)
+	clear_gesture()
+	_seating_socket = socket
+	_seating_path = path
+	_seating_elapsed = 0.0
+	_seating_duration = tuning.snap_duration_seconds
+	var turn := path[0].basis.get_rotation_quaternion().angle_to(path[1].basis.get_rotation_quaternion())
+	_seating_turn_fraction = 0.35 if turn > 0.0001 else 0.0
 	return true
 
+func advance_seating(delta: float) -> void:
+	var socket := _seating_socket
+	if (not is_instance_valid(socket) or not socket.is_inside_tree() or not is_instance_valid(_grab)
+			or socket.pending != _grab or not socket.compatibility_error(_grab).is_empty()
+			or socket.access_blocker() != &"" or _grab.mass > lift_capacity()):
+		interrupt_seating("Installation interrupted.")
+		return
+	var seat := socket.global_transform * (_grab as MechanicalComponent).profile.mating_transform.affine_inverse()
+	if not seat.is_equal_approx(_seating_path[2]):
+		interrupt_seating("Mount moved during installation.")
+		return
+	var previous_progress := _seating_elapsed / _seating_duration
+	_seating_elapsed = minf(_seating_elapsed + delta, _seating_duration)
+	var progress := _seating_elapsed / _seating_duration
+	var pose := _grab.global_transform
+	if previous_progress < _seating_turn_fraction:
+		var aligned := _seating_path[0].interpolate_with(_seating_path[1],
+			smoothstep(0.0, _seating_turn_fraction, progress))
+		if not _clearance.turn_path_clear(pose, aligned):
+			interrupt_seating("Installation path blocked.")
+			return
+		pose = aligned
+	if progress >= _seating_turn_fraction:
+		var destination := _seating_path[1].interpolate_with(seat, smoothstep(_seating_turn_fraction, 1.0, progress))
+		if not _clearance.translation_path_clear(pose, destination):
+			interrupt_seating("Installation path blocked.")
+			return
+		pose = destination
+	_grab.global_transform = pose
+	if progress >= 1.0:
+		if not socket.finish_seating(_grab):
+			interrupt_seating("Mount no longer available.")
+			return
+		clear_seating()
+		_grab = null
+		actor.equipment.presentation.request_pose(HeldItemPresentation.Pose.NORMAL)
+		cancel()
+		grab_feedback.emit("Installed at %s." % socket.definition.mount_id)
+
+func clear_seating() -> void:
+	if is_instance_valid(_seating_socket):
+		_seating_socket.cancel_seating(_grab)
+	_seating_socket = null
+	_seating_path.clear()
+
+func interrupt_seating(message: String) -> void:
+	clear_seating()
+	if is_instance_valid(_grab):
+		valid = _clearance.clear(_grab.global_transform)
+	grab_feedback.emit(message)
+
 func confirm() -> bool:
-	if input_suspended:
+	if input_suspended or is_seating():
 		return false
 	if is_grabbing():
 		if not _supported and not _clearance.clear(_grab.global_transform):

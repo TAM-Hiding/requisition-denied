@@ -18,12 +18,23 @@ func frames(count: int) -> void:
 
 func run() -> void:
 	var facility := preload("res://scenes/facility.tscn").instantiate()
+	facility.chassis_seed = 42
 	root.add_child(facility)
 	current_scene = facility
 	var ui := facility.get_node("InteractionUI")
 	ui.set_physics_process(false)
+	var wrench := facility.get_node("Wrench") as InteractableObject
+	var authored_wrench_pose := wrench.global_transform
 	await frames(4)
 	var otis := facility.get_node("Otis") as OtisController
+	var spawn_clearance := PlacementClearance.new()
+	spawn_clearance.configure(wrench)
+	otis.global_position = Vector3(1.0, 0.02, 0.03)
+	await frames(3)
+	otis.camera.look_at(wrench.global_position)
+	check(spawn_clearance.clear(authored_wrench_pose), "Authored service wrench spawn clears the generator and floor")
+	check(otis.placement.begin_world(wrench), "Freshly settled service wrench can be grabbed")
+	otis.placement.cancel()
 	var generator := facility.get("generator") as MechanicalComponent
 	var assembly := generator.get_node("Assembly") as MechanicalAssembly
 	var panel_mount := assembly.mount(&"access_panel")
@@ -133,7 +144,10 @@ func run() -> void:
 		press.action = &"interact"
 		press.pressed = true
 		ui._input(press)
-		check(not otis.placement.is_active(), "Contextual E routes to Install")
+		check(otis.placement.is_seating(), "Contextual E routes to Install")
+	check(otis.placement.is_seating() and module_mount.occupant == null and assembly.available_stage() == 0,
+		"Generator remains unpowered while its module seats")
+	otis.placement.advance_seating(0.21)
 	check(not otis.placement.is_active() and module.freeze and module.installed_mount == module_mount
 		and module.get_instance_id() == module_id and module.global_transform.is_equal_approx(module_mount.global_transform),
 		"Install retains the body and snaps to the exact mount datum")
@@ -145,10 +159,10 @@ func run() -> void:
 	check(panel_mount.compatibility_error(facility.get_node("Wrench") as MechanicalComponent) != "", "Non-component is rejected")
 	panel.global_transform = panel_mount.global_transform
 	panel.global_position.z += 0.16
-	check(panel_mount.alignment_error(panel).contains("closer"), "Mount enforces position tolerance")
+	check(String(panel_mount.alignment(panel).issue).contains("closer"), "Mount enforces position tolerance")
 	panel.global_transform = panel_mount.global_transform.rotated_local(Vector3.BACK, deg_to_rad(20))
 	panel.global_position.z += 0.03
-	check(panel_mount.alignment_error(panel).contains("Align"), "Mount enforces angular tolerance")
+	check(String(panel_mount.alignment(panel).issue).contains("Align"), "Mount enforces angular tolerance")
 	panel.global_transform = panel_mount.global_transform
 	panel.global_position.z += 0.04
 	check(panel_mount.install(panel).is_empty(), "Panel can be reinstalled")
@@ -158,50 +172,53 @@ func run() -> void:
 		"Reinstalled panel restores the access dependency")
 
 	var fixture := facility.get_node("MountTestFixture/Assembly") as MechanicalAssembly
-	var bracket_mount := fixture.mount(&"fixture_bracket")
-	var bracket := bracket_mount.occupant
-	var bracket_id := bracket.get_instance_id()
+	var battery_mount := fixture.mount(&"battery_socket")
+	var battery := battery_mount.occupant
+	var battery_id := battery.get_instance_id()
+	var seated_clearance := PlacementClearance.new()
+	seated_clearance.configure(battery)
+	check(battery.freeze and seated_clearance.clear(battery.global_transform), "Battery begins seated in a clear bore")
 	var pivot := fixture.mount(&"future_pivot")
-	check(bracket_mount.definition.position_tolerance < panel_mount.definition.position_tolerance, "Independent fixture uses different tolerances")
-	check(not bracket_mount.apply_impact(50.0) and bracket_mount.occupant == bracket, "Exact strength does not detach")
-	check(bracket_mount.apply_impact(50.01) and bracket_mount.occupant == null and not bracket.freeze, "Explicit threshold test detaches bracket")
-	check(bracket_mount.definition.connection.failure_threshold == 50.0, "Failure does not mutate strength metadata")
-	check(pivot.definition.connection.axis == Vector3.FORWARD and pivot.compatibility_error(bracket).contains("not simulated"),
+	check(battery_mount.definition.position_tolerance < panel_mount.definition.position_tolerance, "Independent fixture uses different tolerances")
+	check(not battery_mount.apply_impact(50.0) and battery_mount.occupant == battery, "Exact strength does not detach")
+	check(battery_mount.apply_impact(50.01) and battery_mount.occupant == null and not battery.freeze, "Explicit threshold test detaches battery")
+	check(battery_mount.definition.connection.failure_threshold == 50.0, "Failure does not mutate strength metadata")
+	check(pivot.definition.connection.axis == Vector3.FORWARD and pivot.compatibility_error(battery).contains("not simulated"),
 		"Revolute definition is authored without creating a functional joint")
-	check(panel_mount.compatibility_error(bracket).contains("occupied"), "Occupied mount rejects another body")
+	check(panel_mount.compatibility_error(battery).contains("occupied"), "Occupied mount rejects another body")
 	check(module_mount.definition.connection.fails(400.0, true) and not module_mount.definition.connection.fails(400.0, false),
 		"Condition modifier affects deterministic connection failure")
-	check(panel_mount.remove().is_empty() and panel_mount.compatibility_error(bracket).contains("Incompatible"),
+	check(panel_mount.remove().is_empty() and panel_mount.compatibility_error(battery).contains("Incompatible"),
 		"Vacant socket rejects a component with the wrong tag")
 	panel.global_transform = panel_mount.global_transform
 	panel.global_position.z += 0.04
 	check(panel_mount.install(panel).is_empty(), "Original panel reinstalls after compatibility check")
 
 	for attempt in 3:
-		bracket.global_transform = bracket_mount.global_transform
-		bracket.global_position.y += 0.02
-		check(bracket_mount.install(bracket).is_empty() and bracket.get_instance_id() == bracket_id,
-			"Fixture repeatedly installs the same bracket")
+		battery.global_transform = battery_mount.global_transform
+		battery.global_position.z += 0.03
+		check(battery_mount.install(battery).is_empty() and battery.get_instance_id() == battery_id,
+			"Fixture repeatedly installs the same battery")
 		if attempt < 2:
-			check(bracket_mount.remove().is_empty(), "Fixture repeatedly releases the same bracket")
+			check(battery_mount.remove().is_empty(), "Fixture repeatedly releases the same battery")
 		await frames(2)
-	var owned_pose := bracket.transform
+	var owned_pose := battery.transform
 	var base := fixture.get_parent() as Node3D
 	base.position.x += 0.12
-	check(bracket.transform == owned_pose and bracket.global_transform.is_equal_approx(bracket_mount.global_transform),
+	check(battery.transform == owned_pose and battery.global_transform.is_equal_approx(battery_mount.global_transform),
 		"Fixed attachment follows an ancestor transform")
 	base.position.x -= 0.12
-	check(bracket_mount.remove().is_empty(), "Original bracket can be replaced")
-	bracket.global_position.x += 0.6
-	var replacement := facility.mechanical_part(facility.part_definition(&"RD-FIX-SPARE", "Spare bracket", 2.0),
-		&"fixture_bracket", Vector3(0.33, 0.12, 0.29), null) as MechanicalComponent
+	check(battery_mount.remove().is_empty(), "Original battery can be replaced")
+	battery.global_position.x += 0.6
+	var replacement := facility.mechanical_part(facility.part_definition(&"RD-FIX-SPARE", "Test datum insert", 2.0),
+		&"keyed_battery", Vector3(0.030, 0.030, 0.035), null) as MechanicalComponent
 	replacement.profile.mating_transform = Transform3D(Basis(Vector3.UP, 0.12), Vector3(0.025, 0, 0))
-	replacement.global_transform = bracket_mount.global_transform * replacement.profile.mating_transform.affine_inverse()
-	replacement.global_position.y += 0.02
+	replacement.global_transform = battery_mount.global_transform * replacement.profile.mating_transform.affine_inverse()
+	replacement.global_position.z += 0.03
 	await frames(1)
-	check(bracket_mount.install(replacement).is_empty() and bracket_mount.occupant == replacement
-		and (replacement.global_transform * replacement.profile.mating_transform).is_equal_approx(bracket_mount.global_transform)
-		and bracket.get_instance_id() == bracket_id and bracket.installed_mount == null,
+	check(battery_mount.install(replacement).is_empty() and battery_mount.occupant == replacement
+		and (replacement.global_transform * replacement.profile.mating_transform).is_equal_approx(battery_mount.global_transform)
+		and battery.get_instance_id() == battery_id and battery.installed_mount == null,
 		"Compatible replacement aligns a nonidentity mating datum and leaves the original body intact")
 	check(anchors.occupant == generator and generator.freeze, "Assembly operations leave floor anchors intact")
 
@@ -213,9 +230,26 @@ func run() -> void:
 			check(source.can_supply(basic, true) == (stage >= requirement)
 				and not source.can_supply(basic, false), "Stage %d availability for demand %d" % [stage, requirement])
 
-	await grounded_and_focus(otis, ui, bracket_mount, replacement, facility.get_node("Crate"))
+	check(battery_mount.remove().is_empty(), "Test insert clears the keyed socket")
+	replacement.queue_free()
+	await frames(2)
+	await grounded_and_focus(otis, ui, battery_mount, battery, facility.get_node("Crate"))
+	await battery_and_tuning(facility, otis, battery_mount, battery, module, panel_mount, module_mount)
 
-	await continuous_rotation(otis, facility.get_node("Wrench"))
+	await continuous_rotation(otis, wrench)
+	if DisplayServer.get_name() != "headless":
+		var settings_key := InputEventKey.new()
+		settings_key.physical_keycode = KEY_F4
+		settings_key.pressed = true
+		ui._input(settings_key)
+		check(ui.mechanical_panel.visible and not otis.controls_enabled and otis.placement.input_suspended
+			and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE, "F4 settings own gameplay input and show the cursor")
+		ui.mechanical_panel.switches[3].set_pressed(true)
+		check(otis.placement.invert_vertical_rotation, "The panel applies rotation preferences live")
+		ui.mechanical_panel.reset()
+		ui._input(settings_key)
+		check(not ui.mechanical_panel.visible and otis.controls_enabled and not otis.placement.input_suspended
+			and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED, "Closing settings restores mouse capture and gameplay")
 
 	facility.queue_free()
 	await process_frame
@@ -224,12 +258,15 @@ func run() -> void:
 
 
 func grounded_and_focus(otis: OtisController, ui: Node, socket: MechanicalMount,
-		bracket: MechanicalComponent, crate: InteractableObject) -> void:
+		battery: MechanicalComponent, crate: InteractableObject) -> void:
 	var placement := otis.placement
-	var identity := bracket.get_instance_id()
-	check(socket.remove().is_empty(), "Fixture bracket is loose for pickup recovery")
+	var identity := battery.get_instance_id()
+	var facility := otis.get_parent()
+	var probe_body := facility.mechanical_part(facility.part_definition(&"RD-TEST-CONTACT", "Contact probe", 2.0),
+		&"test", Vector3(0.33, 0.12, 0.29), null) as MechanicalComponent
+	probe_body.global_position = Vector3(-2, 1, -2)
 	var contact_clearance := PlacementClearance.new()
-	contact_clearance.configure(bracket)
+	contact_clearance.configure(probe_body)
 	var cases := [
 		Transform3D(Basis(Vector3.UP, 0.1628244), Vector3(-4.058261, 0.060767, -2.7)),
 		Transform3D(Basis(Vector3.UP, -0.1301519), Vector3(-4.058175, 0.061064, -2.7)),
@@ -242,61 +279,68 @@ func grounded_and_focus(otis: OtisController, ui: Node, socket: MechanicalMount,
 		probe.max_collisions = 8
 		probe.recovery_as_collision = true
 		var result := PhysicsTestMotionResult3D.new()
-		PhysicsServer3D.body_test_motion(bracket.get_rid(), probe, result)
+		PhysicsServer3D.body_test_motion(probe_body.get_rid(), probe, result)
 		var recovered := pose
 		recovered.origin += result.get_travel()
 		var extracted := contact_clearance.pickup_pose(pose)
 		check(not contact_clearance.clear(recovered) and contact_clearance.clear(extracted)
 			and extracted.origin.distance_to(pose.origin) <= PlacementClearance.PICKUP_LIMIT,
 			"Bounded outward sweep clears a fixture contact that recovery alone misses")
-	var floor_y := 0.059
+	var embedded := Transform3D(Basis.IDENTITY, Vector3(-4.12, 0.059, -2.7))
+	check(not contact_clearance.clear(contact_clearance.pickup_pose(embedded)), "Deep obstruction cannot be recovered as a pickup")
+	probe_body.queue_free()
+	var battery_clearance := PlacementClearance.new()
+	battery_clearance.configure(battery)
+	var corner_basis := Basis(Vector3.UP, 0.495721) * Basis(Vector3.RIGHT, -0.007419)
+	var corner := Transform3D(corner_basis, Vector3(-4.160743, 0.034265, -2.637913))
+	var corner_extraction := battery_clearance.pickup_pose(corner, false, Vector3(0, 1.5, 1.3))
+	check(battery_clearance.clear(corner_extraction)
+		and corner_extraction.origin.distance_to(corner.origin) <= PlacementClearance.PICKUP_LIMIT,
+		"Camera-side extraction recovers the battery from the fixture and floor contact")
+	var floor_y := 0.039
 	var samples := [
 		Vector3(-3.3, floor_y, -2.7),
-		Vector3(-4.0596, floor_y, -2.7),
-		Vector3(-5.836, floor_y, -2.0),
-		Vector3(-5.142, floor_y, -2.7),
+		Vector3(-4.184, floor_y, -2.7),
+		Vector3(-5.951, floor_y, -2.0),
+		Vector3(-5.017, floor_y, -2.7),
 	]
 	for index in samples.size():
 		var point: Vector3 = samples[index]
-		bracket.global_transform = Transform3D(Basis.IDENTITY, point)
-		bracket.linear_velocity = Vector3.ZERO
-		bracket.angular_velocity = Vector3.ZERO
-		bracket.sleeping = true
+		battery.global_transform = Transform3D(Basis.IDENTITY, point)
+		battery.linear_velocity = Vector3.ZERO
+		battery.angular_velocity = Vector3.ZERO
+		battery.sleeping = true
 		otis.global_position = Vector3(point.x, 0.02, point.z + 1.1)
-		otis.camera.look_at(bracket.global_position)
+		otis.camera.look_at(battery.global_position)
 		await frames(3)
-		var resting := bracket.global_position
-		check(placement.begin_world(bracket), "Can pick up bracket from floor/contact sample %d" % index)
+		var resting := battery.global_position
+		otis.camera.look_at(resting)
+		check(placement.begin_world(battery), "Can pick up battery from floor/contact sample %d" % index)
 		if placement.is_grabbing():
-			check(bracket.get_instance_id() == identity and bracket.global_position.distance_to(resting) <= 0.026,
-				"Pickup remains local and retains the bracket")
+			check(battery.get_instance_id() == identity and battery.global_position.distance_to(resting) <= 0.026,
+				"Pickup remains local and retains the battery")
 			placement.cancel()
-	var clearance := PlacementClearance.new()
-	clearance.configure(bracket)
-	var embedded := Transform3D(Basis.IDENTITY, Vector3(-4.12, 0.059, -2.7))
-	check(not clearance.clear(clearance.pickup_pose(embedded)), "Deep obstruction cannot be recovered as a pickup")
-
-	bracket.global_transform = Transform3D(Basis.IDENTITY, Vector3(-3.5, 0.10, -2.1))
+	battery.global_transform = Transform3D(Basis.IDENTITY, Vector3(-3.5, 0.10, -2.1))
 	otis.global_position = Vector3(-3.5, 0.02, -0.9)
-	otis.camera.look_at(bracket.global_position)
+	otis.camera.look_at(battery.global_position)
 	await frames(3)
-	otis.camera.look_at(bracket.global_position)
-	check(placement.begin_world(bracket), "Can reacquire bracket after prior cancellations")
+	otis.camera.look_at(battery.global_position)
+	check(placement.begin_world(battery), "Can reacquire battery after prior cancellations")
 	if not placement.is_grabbing():
 		return
 	placement.set_physics_process(true)
 	placement.press_drop(1000000)
 	placement.set_rotating(true)
 	placement.rotate_from_mouse(Vector2(35, 10))
-	var pose := bracket.global_transform
+	var pose := battery.global_transform
 	ui._notification(Node.NOTIFICATION_APPLICATION_FOCUS_OUT)
 	var key_up := InputEventAction.new()
 	key_up.action = &"drop_item"
 	key_up.pressed = false
 	ui._input(key_up)
 	await frames(5)
-	check(placement.input_suspended and not placement.rotating and bracket.freeze
-		and bracket.get_instance_id() == identity and bracket.global_transform == pose,
+	check(placement.input_suspended and not placement.rotating and battery.freeze
+		and battery.get_instance_id() == identity and battery.global_transform == pose,
 		"Focus loss holds the exact pose and discards pending movement and key-up")
 	check(not placement.install_grab() and socket.occupant == null, "Focus suspension cannot install")
 	ui._notification(Node.NOTIFICATION_APPLICATION_FOCUS_IN)
@@ -304,22 +348,24 @@ func grounded_and_focus(otis: OtisController, ui: Node, socket: MechanicalMount,
 	check(placement.is_grabbing() and not placement.input_suspended, "Focus return ignores stale G release")
 	placement.adjust_distance(3)
 	await frames(12)
-	check(bracket.global_position.distance_to(pose.origin) > 0.06, "Placement can continue after focus returns")
+	check(battery.global_position.distance_to(pose.origin) > 0.06, "Placement can continue after focus returns")
 
 	placement.set_physics_process(false)
-	var destination := socket.global_transform * bracket.profile.mating_transform.affine_inverse()
-	bracket.global_transform = destination
-	bracket.global_position.y += 0.12
+	var destination := socket.global_transform * battery.profile.mating_transform.affine_inverse()
+	battery.global_transform = destination
+	battery.global_position.z += 0.25
 	check(placement.installation_candidate() == socket and not placement.installation_feedback(socket).is_empty()
 		and not placement.install_grab() and placement.is_grabbing(), "Acquisition is wider than positional snap tolerance")
-	bracket.global_transform = destination.rotated_local(Vector3.UP, deg_to_rad(20.0))
-	bracket.global_position.y += 0.02
+	battery.global_transform = destination.rotated_local(Vector3.UP, deg_to_rad(45.0))
+	battery.global_position.z += 0.16
 	check(placement.installation_candidate() == socket and placement.installation_feedback(socket).contains("Align"),
 		"Acquired misaligned mount explains the orientation requirement")
-	bracket.global_transform = destination
-	bracket.global_position.y += 0.02
-	check(placement.install_grab() and socket.occupant == bracket and not placement.is_active(),
-		"Install after focus interruption and failed alignment preserves the same bracket")
+	battery.global_transform = destination
+	battery.global_position.z += 0.03
+	check(placement.install_grab() and socket.occupant == null, "Install starts without registering the connection")
+	placement.advance_seating(0.21)
+	check(socket.occupant == battery and not placement.is_active(),
+		"Install after focus interruption and failed alignment preserves the same battery")
 	otis.global_position = Vector3(crate.global_position.x, 0.02, crate.global_position.z + 2.1)
 	otis.camera.look_at(crate.global_position)
 	await frames(3)
@@ -394,3 +440,141 @@ func continuous_rotation(otis: OtisController, wrench: InteractableObject) -> vo
 	otis.camera.look_at(wrench.global_position)
 	check(placement.begin_world(wrench), "Wrench can be regrabbed after arbitrary placement")
 	placement.cancel()
+
+func battery_and_tuning(facility: Node3D, otis: OtisController, socket: MechanicalMount,
+		battery: MechanicalComponent, module: MechanicalComponent, panel_mount: MechanicalMount,
+		module_mount: MechanicalMount) -> void:
+	var placement := otis.placement
+	var settings := placement.mechanical_settings
+	var id := battery.get_instance_id()
+	check(socket.occupant == battery and socket.definition.keyed, "Battery is seated in a keyed socket")
+	check(socket.remove().is_empty(), "Battery extracts through the physical socket")
+	var seat := socket.global_transform
+	var approach := seat.translated(Vector3.BACK * 0.17)
+	otis.global_position = Vector3(-4.6, 0.02, -0.87)
+	battery.global_transform = approach
+	await frames(2)
+	battery.global_transform = approach
+	otis.camera.look_at(battery.global_position)
+	await frames(1)
+	check(placement.begin_world(battery), "Battery can enter precision manipulation")
+	if not placement.is_grabbing():
+		return
+	battery.global_transform = approach.rotated_local(Vector3.UP, PI)
+	check(placement.installation_feedback(socket).contains("insertion axis"), "Wrong-end insertion is rejected")
+	battery.global_transform = approach.rotated_local(Vector3.BACK, deg_to_rad(45))
+	check(placement.installation_feedback(socket).contains("key"), "Incorrect roll is rejected independently of axis")
+	var candidate := settings.values.duplicate(true)
+	candidate.installation.key_rotation_tolerance_degrees = 50.0
+	check(settings.apply(candidate).is_empty() and placement.installation_feedback(socket).is_empty(),
+		"Wider key tolerance takes effect on the next request")
+	battery.global_transform = approach.rotated_local(Vector3.UP, deg_to_rad(35))
+	check(placement.installation_feedback(socket).contains("axis"), "Default insertion-axis tolerance applies")
+	candidate.installation.axis_tolerance_degrees = 40.0
+	check(settings.apply(candidate).is_empty() and placement.installation_feedback(socket).is_empty(),
+		"Wider axis tolerance takes effect on the next request")
+	battery.global_transform = approach
+	candidate.installation.snap_distance_m = 0.12
+	check(settings.apply(candidate).is_empty() and placement.installation_candidate() == socket
+		and placement.installation_feedback(socket).contains("closer"), "Snap distance is separate from acquisition")
+	candidate.installation.acquisition_distance_m = 0.14
+	check(settings.apply(candidate).is_empty() and placement.installation_candidate() == null,
+		"Acquisition distance changes the candidate without changing compatibility")
+	settings.reset()
+	check(placement.installation_candidate() == socket and placement.installation_feedback(socket).is_empty(),
+		"Defaults restore the snap distance and candidate")
+	var blocker := facility.call("box", facility, "KeyedSweepBlocker", Vector3(0.03, 0.03, 0.012),
+		seat.origin + Vector3.BACK * 0.12, null, true) as StaticBody3D
+	await frames(2)
+	check(placement.installation_feedback(socket).contains("blocked") and not placement.install_grab(),
+		"Solid geometry between clear endpoints blocks battery installation")
+	blocker.queue_free()
+	await frames(2)
+	battery.global_transform = approach.rotated_local(Vector3.BACK, deg_to_rad(25))
+	check(placement.installation_feedback(socket).is_empty(), "Correct insertion end and approximate key alignment are assisted")
+	candidate = settings.values.duplicate(true)
+	candidate.installation.snap_duration_seconds = 0.40
+	check(settings.apply(candidate).is_empty() and placement.install_grab(), "Explicit install starts animated seating")
+	check(socket.pending == battery and socket.occupant == null and not placement.install_grab() and not placement.confirm(),
+		"Pending seating is exclusive and ordinary placement cannot bypass it")
+	placement.advance_seating(0.17)
+	check(socket.occupant == null and placement.is_seating() and battery.global_position.distance_to(seat.origin) < 0.17,
+		"Battery visibly moves before the functional connection exists")
+	settings.reset()
+	placement.advance_seating(0.04)
+	check(socket.occupant == null, "Live tuning cannot shorten an ongoing animation")
+	placement.advance_seating(0.20)
+	check(socket.occupant == battery and battery.get_instance_id() == id
+		and battery.global_transform.is_equal_approx(seat), "Seating completes with the exact datum and identity")
+	check(socket.remove().is_empty(), "Same battery can be removed again")
+	battery.global_transform = approach
+	await frames(1)
+	otis.camera.look_at(battery.global_position)
+	check(placement.begin_world(battery) and placement.install_grab(), "Repeated explicit seating starts")
+	var moving_blocker := facility.call("box", facility, "LateSeatBlocker", Vector3(0.03, 0.03, 0.012),
+		seat.origin + Vector3.BACK * 0.12, null, true) as StaticBody3D
+	await frames(2)
+	placement.advance_seating(0.20)
+	check(not placement.is_seating() and placement.is_grabbing() and socket.pending == null
+		and socket.occupant == null and battery.get_instance_id() == id,
+		"A blocker entering after confirmation interrupts seating and retains control")
+	moving_blocker.queue_free()
+	await frames(2)
+	check(placement.install_grab(), "Clearing an interrupted path permits another attempt")
+	placement.cancel()
+	check(socket.pending == null and socket.occupant == null and not battery.freeze
+		and battery.get_instance_id() == id, "Cancellation clears reservation and releases the same live body")
+
+	var file := "user://rd007_test_%d.json" % Time.get_ticks_usec()
+	candidate = settings.values.duplicate(true)
+	candidate.installation.snap_distance_m = 0.24
+	candidate.rotation.invert_vertical = true
+	check(settings.apply(candidate).is_empty() and settings.save_file(file).is_empty(), "Runtime values save as JSON")
+	var from_disk := MechanicalInteractionSettings.new()
+	check(from_disk.load_file(file).is_empty() and is_equal_approx(from_disk.values.installation.snap_distance_m, 0.24)
+		and from_disk.values.rotation.invert_vertical, "New settings instance restores saved values")
+	var snapshot := settings.export_snapshot()
+	settings.reset()
+	check(not snapshot.is_empty() and settings.load_file(snapshot).is_empty()
+		and settings.values.rotation.invert_vertical, "Timestamped snapshot exports and imports")
+	var invalid := candidate.duplicate(true)
+	invalid.schema_version = 99
+	check(settings.apply(invalid).contains("Unsupported"), "Unknown schema reports a validation error")
+	invalid.schema_version = 1
+	invalid.installation.snap_distance_m = INF
+	check(settings.apply(invalid).contains("finite"), "Non-finite numeric setting is rejected")
+	invalid.installation.snap_distance_m = 0.50
+	check(not settings.apply(invalid).is_empty(), "Out-of-range numeric setting is rejected")
+	var broken := FileAccess.open(file, FileAccess.WRITE)
+	broken.store_string("{ malformed")
+	broken.close()
+	check(settings.load_file(file).contains("Invalid JSON") and settings.values.rotation.invert_vertical,
+		"Malformed JSON reports the failure and leaves active settings intact")
+	DirAccess.remove_absolute(file)
+	if not snapshot.is_empty():
+		DirAccess.remove_absolute(snapshot)
+	settings.reset()
+
+	var cover := panel_mount.occupant
+	check(panel_mount.remove().is_empty(), "Cover can be removed before the plate pickup test")
+	cover.global_position.x -= 1.0
+	check(module_mount.remove().is_empty(), "Module can be removed for repeated plate pickups")
+	var plate_clearance := PlacementClearance.new()
+	plate_clearance.configure(module)
+	var resting_pose := Transform3D(Basis.IDENTITY, Vector3(2.7, 0.2455, 1.4))
+	check(plate_clearance.physically_clear(resting_pose) and not plate_clearance.clear(resting_pose),
+		"A supported pose may be physically clear while inside the preview margin")
+	check(plate_clearance.clear(plate_clearance.depart_resting_pose(resting_pose, Vector3.UP * 0.05))
+		and plate_clearance.depart_resting_pose(resting_pose, Vector3.DOWN).is_equal_approx(resting_pose),
+		"Resting departure can lift the module but cannot enter the supporting floor")
+	for iteration in 5:
+		module.global_transform = Transform3D(Basis(Vector3.UP, 0.19 * iteration), Vector3(2.7, 0.26, 1.4))
+		module.linear_velocity = Vector3.ZERO
+		module.angular_velocity = Vector3.ZERO
+		module.sleeping = false
+		otis.global_position = Vector3(2.7, 0.02, 2.7)
+		await frames(24)
+		otis.camera.look_at(module.global_position)
+		check(placement.begin_world(module), "Settled module can be retrieved from pressure plate, cycle %d" % iteration)
+		if placement.is_grabbing():
+			check(placement.confirm(), "Retrieved module can be placed back on the plate")

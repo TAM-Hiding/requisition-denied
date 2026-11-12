@@ -45,8 +45,31 @@ func query(pose: Transform3D, mask: int, extra_margin: float = 0.0) -> PhysicsSh
 func clear(pose: Transform3D, mask: int = 3, extra_margin: float = 0.0) -> bool:
 	return space.intersect_shape(query(pose, mask, extra_margin), 1).is_empty()
 
-## Recover only local resting contacts. The body sweep includes the player and world.
-func pickup_pose(pose: Transform3D, debug_failure := false) -> Transform3D:
+## Check the real occupied volume without the manipulation margin.
+func physically_clear(pose: Transform3D) -> bool:
+	var parameters := query(pose, 3)
+	parameters.margin = 0.0
+	return space.intersect_shape(parameters, 1).is_empty()
+
+## Leave a resting contact using the physical shape before resuming padded placement.
+func depart_resting_pose(pose: Transform3D, displacement: Vector3) -> Transform3D:
+	if not physically_clear(pose):
+		return pose
+	var contact := space.get_rest_info(query(pose, 3))
+	if not contact.is_empty():
+		var normal: Vector3 = contact.normal
+		displacement -= normal * minf(0.0, displacement.dot(normal))
+	if displacement.length_squared() <= MOTION_EPSILON * MOTION_EPSILON:
+		return pose
+	var parameters := query(pose, 3)
+	parameters.margin = 0.0
+	parameters.motion = displacement
+	var safe_fraction := space.cast_motion(parameters)[0]
+	var candidate := pose.translated(displacement * safe_fraction)
+	return candidate if physically_clear(candidate) else pose
+
+## Recover only local resting contacts. Both sweeps include the player and world.
+func pickup_pose(pose: Transform3D, debug_failure := false, preferred := Vector3.ZERO) -> Transform3D:
 	if clear(pose):
 		return pose
 	var motion := PhysicsTestMotionParameters3D.new()
@@ -69,9 +92,19 @@ func pickup_pose(pose: Transform3D, debug_failure := false) -> Transform3D:
 		if not normals.any(func(existing: Vector3) -> bool: return existing.dot(normal) > 0.999):
 			normals.append(normal)
 			combined += normal
+	var initial := query(pose, 3)
+	var resting := space.get_rest_info(initial)
+	if not resting.is_empty() and not normals.any(func(normal: Vector3) -> bool: return normal.dot(resting.normal) > 0.999):
+		normals.append(resting.normal)
+		combined += resting.normal
 	var directions := normals.duplicate()
 	directions.push_front(combined.normalized())
 	directions.append(Vector3.UP)
+	directions.append(clip_motion(preferred.normalized(), normals).normalized())
+	directions.append((combined.normalized() + preferred.normalized()).normalized())
+	var exact := query(pose, 3)
+	exact.margin = 0.0
+	var starts_clear := space.intersect_shape(exact, 1).is_empty()
 	var attempts: Array[Dictionary] = []
 	motion.recovery_as_collision = false
 	# The backend recovers before sweeping. Short outward alternatives can
@@ -81,6 +114,20 @@ func pickup_pose(pose: Transform3D, debug_failure := false) -> Transform3D:
 			continue
 		for length in [0.006, 0.012, 0.018]:
 			motion.motion = direction * length
+			# A valid resting pose can touch the manipulation margin. Test an
+			# extraction with actual geometry before asking for preview clearance.
+			if starts_clear:
+				exact.motion = motion.motion
+				var end := pose.translated(motion.motion)
+				var safe := space.cast_motion(exact)
+				if safe[0] >= 1.0 and clear(end):
+					return end
+				if debug_failure:
+					var sample := pose.translated(motion.motion * safe[1])
+					var hits := space.intersect_shape(query(sample, 3), 1)
+					attempts.append({"direction": direction, "destination": end.origin,
+						"result": "exact sweep" if safe[0] < 1.0 else "preview margin",
+						"blocker": _pickup_blocker(hits[0].collider) if not hits.is_empty() else "none"})
 			var blocked := PhysicsServer3D.body_test_motion(item.get_rid(), motion, result)
 			var candidate := pose
 			candidate.origin += result.get_travel()
@@ -97,14 +144,13 @@ func pickup_pose(pose: Transform3D, debug_failure := false) -> Transform3D:
 					"result": "path" if blocked else "destination" if not destination.is_empty() else "recovery limit",
 					"blocker": _pickup_blocker(body)})
 	if debug_failure:
-		var initial := query(pose, 3)
 		var contacts := space.intersect_shape(initial, 8)
-		initial.margin = 0.0
-		var initial_state := "overlap" if not space.intersect_shape(initial, 1).is_empty() else "clearance margin"
+		var initial_state := "clearance margin" if starts_clear else "overlap"
 		var blockers: Array[String] = []
 		for contact in contacts:
 			blockers.append(_pickup_blocker(contact.collider))
-		print("PICKUP BLOCKED ", item.definition.object_id, " ", collider.shape.get_class(),
+		print("PICKUP ", "WAITING FOR DEPARTURE " if starts_clear else "BLOCKED ",
+			item.definition.object_id, " ", collider.shape.get_class(),
 			" pose=", pose, " initial=", initial_state, " blockers=", blockers,
 			" recovery_destination=", recovered.origin, " recovery=", recovery, " attempts=", attempts)
 	return pose
@@ -287,3 +333,20 @@ func rotation_clear(from: Transform3D, to: Transform3D, radians: float) -> bool:
 	# Cover the arc and any concurrent motion of its reference point.
 	var arc_margin := (scaled_radius(from) * absf(radians) + from.origin.distance_to(to.origin)) * 0.5
 	return clear(from.interpolate_with(to, 0.5), 3, arc_margin) and clear(to)
+
+## Check rotation in small increments so a clear arc can approach a socket.
+func turn_path_clear(from: Transform3D, to: Transform3D) -> bool:
+	var radians := from.basis.get_rotation_quaternion().angle_to(to.basis.get_rotation_quaternion())
+	if radians < MOTION_EPSILON:
+		return clear(to)
+	var steps := maxi(1, ceili(radians / 0.035))
+	var previous := from
+	for index in range(1, steps + 1):
+		var next := from.interpolate_with(to, float(index) / steps)
+		if not rotation_clear(previous, next, radians / steps):
+			return false
+		previous = next
+	return true
+
+func translation_path_clear(from: Transform3D, to: Transform3D) -> bool:
+	return clear(from) and sweep_translation(from, to.origin - from.origin).origin.is_equal_approx(to.origin)

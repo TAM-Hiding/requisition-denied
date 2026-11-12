@@ -5,6 +5,7 @@ enum Integrity { INTACT, DAMAGED, BROKEN }
 @export var profile: ComponentProfile
 @export var integrity := Integrity.INTACT
 var installed_mount: MechanicalMount
+var seating_mount: MechanicalMount
 var loose_parent: Node3D
 
 func mobility() -> int:

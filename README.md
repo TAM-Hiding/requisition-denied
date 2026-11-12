@@ -34,6 +34,7 @@ godot --path .
 | G tap / hold | Hold for 0.2 s to manipulate an equipped item or a targeted movable object. Release the hold to keep manipulating. Tap G to place, or to drop ordinary equipment when idle. |
 | 1 | Retrieve the first stored item into the active slot |
 | F3 | Toggle developer diagnostics |
+| F4 | Open or close Development / Mechanical Interaction |
 
 Movement is suspended while a menu is open or the mouse is released. The menu
 supports keyboard navigation with Tab / arrow keys and Enter. Inspect records
@@ -68,29 +69,80 @@ placement for equipped items, which return to equipment on Escape. Overweight
 objects drag horizontally under gravity. The plate measures suspended weight
 through Otis's contact with the floor.
 
-Middle-mouse rotation continues across complete revolutions. The
-`PrecisionPlacement` scene node exposes independent horizontal and vertical
-rotation inversion alongside sensitivity. Both inversion flags default off.
-Enable the F3 overlay to log detailed pickup failures to the Godot console.
+Middle-mouse rotation continues across complete revolutions. Adjust horizontal
+and vertical rotation inversion independently in the F4 panel. The
+`PrecisionPlacement` scene node still exposes rotation sensitivity and initial
+inversion defaults. Both inversion flags are shipped off.
 
 ## Mechanical assembly
 
-Inspect the auxiliary generator to see its installed parts and available power
-stage. Use **E → Remove** on the service panel, then move the loose panel clear
-of the bay before removing the power module. Move each loose component with the
-existing precision controls. Align it with its mount and press **E** when
-**Install** appears. A nearby compatible mount can ask you to move closer or
-rotate before installation is available. **G** still places the part loose in
-the world. Reinstall
-the module before closing the service panel.
+Use **E → Remove** on the generator service panel, move the panel clear, then
+remove the power module. Use the precision controls to bring each part to its
+mount. Press **E** when **Install** appears and wait for the part to seat.
+Inspect the generator to verify Stage 3. Placing the module with **G** leaves it loose and
+Stage 3 unavailable. Install the module before closing the service panel.
 
-The independent bracket fixture uses the same system with tighter tolerances.
-Mount definitions carry the mating pose, compatibility tags, access
-dependencies, joint metadata and optional failure strength. Fixed attachments
-use the original rigid body. Revolute and prismatic connections are available
-as definition data. Power stages describe consumer compatibility. Visual meshes
-can be replaced independently of colliders and mounting data, including future
-glTF or GLB assets.
+The independent battery fixture uses the same mounting system. Remove the
+yellow cartridge and approach the dark socket with its silver terminal first
+and raised ridge facing the top slot. The HUD can ask you to move closer,
+align the insertion axis, or rotate the key. If the path is blocked, back out
+and clear the approach. Press **E** to seat the cartridge or **Esc** to
+interrupt seating and release it. A new obstruction during seating returns
+control of the same part to precision manipulation.
+
+Mount definitions carry the mating pose, compatibility tags, keying, access
+dependencies, joint metadata, and optional failure strength. The snap path
+checks a short alignment turn followed by a direct insertion sweep. Both
+stages are checked again during seating. A fixed connection takes effect
+when the original body reaches its exact mating pose. Revolute and prismatic
+connections are available as definition data.
+
+### Mechanical Interaction settings
+
+Press **F4** during first-person gameplay. Values apply live to subsequent
+installation attempts. **Save Settings** persists the profile in
+`user://mechanical_interaction_settings.json`. **Reset to Defaults** restores
+live defaults. Save afterward to keep the reset on restart.
+
+| Field | Default | Range |
+| --- | ---: | ---: |
+| Acquisition distance | 0.30 m | 0.10–0.60 m |
+| Snap distance | 0.20 m | 0.01–0.30 m |
+| Insertion-axis tolerance | 30° | 1–60° |
+| Key rotation tolerance | 35° | 1–75° |
+| Snap duration | 0.20 s | 0.05–1.00 s |
+
+Acquisition must be at least as wide as snap distance. The generator retains
+its authored front approach allowance. Clearance checks still apply to all
+mounts. **F3** displays the candidate, distance, axis and key errors, path
+status, and installation eligibility. When enabled in F4, pickup diagnostics
+also log the original pose, contacts, candidate extraction paths, and
+clearance failure stage to the Godot console.
+
+**Export Snapshot** writes `mechanical_interaction_<timestamp>_<ticks>.json`
+in the project user-data directory and displays its absolute path. On Linux
+the directory defaults to
+`~/.local/share/godot/app_userdata/Requisition Denied/`, subject to
+`XDG_DATA_HOME`. **Import Snapshot** opens a file picker and applies a valid
+file live. Save separately to make it the launch profile.
+
+The snapshot uses schema version 1.
+
+```json
+{
+  "schema_version": 1,
+  "installation": {
+    "acquisition_distance_m": 0.3,
+    "snap_distance_m": 0.2,
+    "axis_tolerance_degrees": 30.0,
+    "key_rotation_tolerance_degrees": 35.0,
+    "snap_duration_seconds": 0.2
+  },
+  "pickup": { "show_clearance_diagnostics": true },
+  "rotation": { "invert_horizontal": false, "invert_vertical": false },
+  "debug": { "show_alignment_diagnostics": true }
+}
+```
 
 ## Structure
 
