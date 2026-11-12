@@ -148,7 +148,9 @@ func run() -> void:
 	await frames(24)
 	check(crate.position.y > start_height + 0.20, "Contextual Move can lift within capacity")
 	ui._notification(Node.NOTIFICATION_APPLICATION_FOCUS_OUT)
-	check(not placement.is_active() and not crate.freeze, "Focus loss releases contextual movement")
+	check(placement.is_active() and crate.freeze and placement.input_suspended, "Focus loss suspends contextual movement")
+	ui._notification(Node.NOTIFICATION_APPLICATION_FOCUS_IN)
+	placement.cancel()
 	await frames(30)
 
 	await check_obstacle(actor, crate, Vector3(2.5, 0.01, 4.7), Vector3.RIGHT, 6.0, "east wall")

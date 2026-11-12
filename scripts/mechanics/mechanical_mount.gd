@@ -32,6 +32,15 @@ func compatibility_error(component: MechanicalComponent) -> String:
 				return ""
 	return "Incompatible component."
 
+func mating_distance_squared(component: MechanicalComponent) -> float:
+	if component.profile == null:
+		return INF
+	return (component.global_transform * component.profile.mating_transform).origin.distance_squared_to(global_position)
+
+func can_acquire(component: MechanicalComponent, gap_squared: float) -> bool:
+	var radius := maxf(definition.acquisition_distance, definition.position_tolerance)
+	return gap_squared <= radius * radius and compatibility_error(component).is_empty() and access_blocker() == &""
+
 func alignment_error(component: MechanicalComponent) -> String:
 	var issue := compatibility_error(component)
 	if not issue.is_empty():
@@ -39,7 +48,7 @@ func alignment_error(component: MechanicalComponent) -> String:
 	var blocker := access_blocker()
 	if blocker != &"":
 		return "Clear %s first." % blocker
-	if (component.global_transform * component.profile.mating_transform).origin.distance_to(global_position) > definition.position_tolerance:
+	if mating_distance_squared(component) > definition.position_tolerance * definition.position_tolerance:
 		return "Move closer to the mount."
 	if _angle_from(component.global_transform * component.profile.mating_transform) > deg_to_rad(definition.angle_tolerance_degrees):
 		return "Align the component with the mount."

@@ -77,8 +77,8 @@ func run() -> void:
 	var obstruction := facility.box(facility, "MountPathObstruction", Vector3(0.1, 0.1, 0.012),
 		module_mount.global_position - Vector3.BACK * 0.155, null, true) as StaticBody3D
 	await frames(2)
-	check(otis.placement.installation_candidate() == null and not otis.placement.install_grab()
-		and otis.placement.is_active(), "A blocked snap neither offers Install nor releases the original body")
+	check(otis.placement.installation_candidate() == module_mount and not otis.placement.install_grab()
+		and otis.placement.is_active(), "A blocked snap keeps the target and original body")
 	obstruction.queue_free()
 	await frames(3)
 	check(otis.placement.installation_candidate() == module_mount, "Aligned module offers contextual Install")
@@ -146,6 +146,7 @@ func run() -> void:
 	base.position.x += 0.12
 	check(bracket.transform == owned_pose and bracket.global_transform.is_equal_approx(bracket_mount.global_transform),
 		"Fixed attachment follows an ancestor transform")
+	base.position.x -= 0.12
 	check(bracket_mount.remove().is_empty(), "Original bracket can be replaced")
 	bracket.global_position.x += 0.6
 	var replacement := facility.mechanical_part(facility.part_definition(&"RD-FIX-SPARE", "Spare bracket", 2.0),
@@ -168,7 +169,95 @@ func run() -> void:
 			check(source.can_supply(basic, true) == (stage >= requirement)
 				and not source.can_supply(basic, false), "Stage %d availability for demand %d" % [stage, requirement])
 
+	await grounded_and_focus(otis, ui, bracket_mount, replacement, facility.get_node("Crate"))
+
 	facility.queue_free()
 	await process_frame
 	print("RD-007: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures else 0)
+
+
+func grounded_and_focus(otis: OtisController, ui: Node, socket: MechanicalMount,
+		bracket: MechanicalComponent, crate: InteractableObject) -> void:
+	var placement := otis.placement
+	var identity := bracket.get_instance_id()
+	check(socket.remove().is_empty(), "Fixture bracket is loose for pickup recovery")
+	var floor_y := 0.059
+	var samples := [
+		Vector3(-3.3, floor_y, -2.7),
+		Vector3(-4.0596, floor_y, -2.7),
+		Vector3(-5.836, floor_y, -2.0),
+		Vector3(-5.142, floor_y, -2.7),
+	]
+	for index in samples.size():
+		var point: Vector3 = samples[index]
+		bracket.global_transform = Transform3D(Basis.IDENTITY, point)
+		bracket.linear_velocity = Vector3.ZERO
+		bracket.angular_velocity = Vector3.ZERO
+		bracket.sleeping = true
+		otis.global_position = Vector3(point.x, 0.02, point.z + 1.1)
+		otis.camera.look_at(bracket.global_position)
+		await frames(3)
+		var resting := bracket.global_position
+		check(placement.begin_world(bracket), "Can pick up bracket from floor/contact sample %d" % index)
+		if placement.is_grabbing():
+			check(bracket.get_instance_id() == identity and bracket.global_position.distance_to(resting) <= 0.026,
+				"Pickup remains local and retains the bracket")
+			placement.cancel()
+	var clearance := PlacementClearance.new()
+	clearance.configure(bracket)
+	var embedded := Transform3D(Basis.IDENTITY, Vector3(-4.12, 0.059, -2.7))
+	check(not clearance.clear(clearance.pickup_pose(embedded)), "Deep obstruction cannot be recovered as a pickup")
+
+	bracket.global_transform = Transform3D(Basis.IDENTITY, Vector3(-3.5, 0.10, -2.1))
+	otis.global_position = Vector3(-3.5, 0.02, -0.9)
+	otis.camera.look_at(bracket.global_position)
+	await frames(3)
+	otis.camera.look_at(bracket.global_position)
+	check(placement.begin_world(bracket), "Can reacquire bracket after prior cancellations")
+	if not placement.is_grabbing():
+		return
+	placement.set_physics_process(true)
+	placement.press_drop(1000000)
+	placement.set_rotating(true)
+	placement.rotate_from_mouse(Vector2(35, 10))
+	var pose := bracket.global_transform
+	ui._notification(Node.NOTIFICATION_APPLICATION_FOCUS_OUT)
+	var key_up := InputEventAction.new()
+	key_up.action = &"drop_item"
+	key_up.pressed = false
+	ui._input(key_up)
+	await frames(5)
+	check(placement.input_suspended and not placement.rotating and bracket.freeze
+		and bracket.get_instance_id() == identity and bracket.global_transform == pose,
+		"Focus loss holds the exact pose and discards pending movement and key-up")
+	check(not placement.install_grab() and socket.occupant == null, "Focus suspension cannot install")
+	ui._notification(Node.NOTIFICATION_APPLICATION_FOCUS_IN)
+	ui._input(key_up)
+	check(placement.is_grabbing() and not placement.input_suspended, "Focus return ignores stale G release")
+	placement.adjust_distance(3)
+	await frames(12)
+	check(bracket.global_position.distance_to(pose.origin) > 0.06, "Placement can continue after focus returns")
+
+	placement.set_physics_process(false)
+	var destination := socket.global_transform * bracket.profile.mating_transform.affine_inverse()
+	bracket.global_transform = destination
+	bracket.global_position.y += 0.12
+	check(placement.installation_candidate() == socket and not placement.installation_feedback(socket).is_empty()
+		and not placement.install_grab() and placement.is_grabbing(), "Acquisition is wider than positional snap tolerance")
+	bracket.global_transform = destination.rotated_local(Vector3.UP, deg_to_rad(20.0))
+	bracket.global_position.y += 0.02
+	check(placement.installation_candidate() == socket and placement.installation_feedback(socket).contains("Align"),
+		"Acquired misaligned mount explains the orientation requirement")
+	bracket.global_transform = destination
+	bracket.global_position.y += 0.02
+	check(placement.install_grab() and socket.occupant == bracket and not placement.is_active(),
+		"Install after focus interruption and failed alignment preserves the same bracket")
+	otis.global_position = Vector3(crate.global_position.x, 0.02, crate.global_position.z + 2.1)
+	otis.camera.look_at(crate.global_position)
+	await frames(3)
+	check(placement.begin_world(crate), "A different body can be grabbed after installation")
+	ui._notification(Node.NOTIFICATION_APPLICATION_FOCUS_OUT)
+	ui._notification(Node.NOTIFICATION_APPLICATION_FOCUS_IN)
+	placement.cancel()
+	check(not placement.is_active() and not crate.freeze, "Explicit cancellation still releases after a focus cycle")

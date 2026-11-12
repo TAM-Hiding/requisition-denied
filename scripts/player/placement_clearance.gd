@@ -44,6 +44,24 @@ func query(pose: Transform3D, mask: int, extra_margin: float = 0.0) -> PhysicsSh
 func clear(pose: Transform3D, mask: int = 3, extra_margin: float = 0.0) -> bool:
 	return space.intersect_shape(query(pose, mask, extra_margin), 1).is_empty()
 
+## Ask the physics backend for local contact recovery before taking ownership.
+## A small bound permits separation from resting contacts without relocating a trapped body.
+func pickup_pose(pose: Transform3D) -> Transform3D:
+	if clear(pose):
+		return pose
+	var query := PhysicsTestMotionParameters3D.new()
+	query.from = pose
+	query.margin = 0.003
+	query.max_collisions = 8
+	query.recovery_as_collision = true
+	var result := PhysicsTestMotionResult3D.new()
+	PhysicsServer3D.body_test_motion(item.get_rid(), query, result)
+	var recovered := pose
+	recovered.origin += result.get_travel()
+	if recovered.origin.distance_to(pose.origin) <= 0.025 and clear(recovered):
+		return recovered
+	return pose
+
 func slide(pose: Transform3D, displacement: Vector3, mask: int = 3) -> Transform3D:
 	_contact_normal = Vector3.ZERO
 	if not clear(pose, mask):

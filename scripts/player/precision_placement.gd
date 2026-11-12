@@ -23,6 +23,7 @@ var _pending_rotation := Quaternion.IDENTITY
 var _grab_candidate: InteractableObject
 var _grab: InteractableObject
 var _supported := false
+var input_suspended := false
 var _clearance: PlacementClearance
 @onready var actor: OtisController = get_parent() as OtisController
 
@@ -52,6 +53,8 @@ static func response_factor(mass_kg: float, capacity_kg: float) -> float:
 	return lerpf(1.0, MIN_RESPONSE, clampf(mass_kg / maxf(capacity_kg, 0.001), 0.0, 1.0))
 
 func press_drop(now: int = -1) -> void:
+	if input_suspended:
+		return
 	_pressed_at = Time.get_ticks_usec() if now < 0 else now
 	_hold_consumed = false
 	_grab_candidate = null
@@ -90,7 +93,7 @@ func clear_gesture() -> void:
 
 func begin() -> bool:
 	var item := actor.equipment.held_item()
-	if item == null or is_active():
+	if input_suspended or item == null or is_active():
 		return false
 	var clearance := PlacementClearance.new()
 	if not clearance.configure(item) or not clearance.clear(item.global_transform, 1):
@@ -105,7 +108,7 @@ func begin() -> bool:
 	return true
 
 func begin_world(item: InteractableObject) -> bool:
-	if (is_active() or not is_instance_valid(item)
+	if (input_suspended or is_active() or not is_instance_valid(item)
 			or item.mobility() == ObjectDefinition.Mobility.FIXED
 			or item.state != InteractableObject.State.WORLD or item.freeze
 			or actor.target_hit().get("collider") != item):
@@ -115,17 +118,10 @@ func begin_world(item: InteractableObject) -> bool:
 	if not supported:
 		if not clearance.configure(item):
 			return false
-		var pose := item.global_transform
+		var pose := clearance.pickup_pose(item.global_transform)
 		if not clearance.clear(pose):
-			# Grounded bodies can rest within the release margin. Sweep out
-			# of the contact before committing any state change.
-			var rise := PhysicsTestMotionParameters3D.new()
-			rise.from = pose
-			rise.motion = Vector3.UP * 0.012
-			pose.origin += rise.motion
-			if PhysicsServer3D.body_test_motion(item.get_rid(), rise) or not clearance.clear(pose):
-				grab_feedback.emit("There is not enough clearance to grab the load.")
-				return false
+			grab_feedback.emit("The load has no clear pickup path.")
+			return false
 		item.freeze = true
 		item.global_transform = pose
 		item.state = InteractableObject.State.CARRIED
@@ -174,7 +170,7 @@ func cancel() -> void:
 	_clearance = null
 
 func set_rotating(enabled: bool) -> void:
-	rotating = enabled and is_active() and not is_supported_grab()
+	rotating = enabled and not input_suspended and is_active() and not is_supported_grab()
 	_trackball_cursor = Vector2.ZERO
 	_pending_rotation = Quaternion.IDENTITY
 
@@ -204,8 +200,18 @@ static func _project_trackball(cursor: Vector2) -> Vector3:
 	var depth := sqrt(1.0 - radius_squared) if radius_squared <= 0.5 else 0.5 / sqrt(radius_squared)
 	return Vector3(cursor.x, cursor.y, depth).normalized()
 
+func set_input_suspended(suspended: bool) -> void:
+	input_suspended = suspended
+	clear_gesture()
+	set_rotating(false)
+	if is_supported_grab():
+		_grab.move_goal = _grab.global_position
+		_grab.move_speed_scale = 0.0 if suspended else MIN_RESPONSE
+		if suspended:
+			_grab.linear_velocity = Vector3.UP * _grab.linear_velocity.y
+
 func _physics_process(delta: float) -> void:
-	if is_active():
+	if is_active() and not input_suspended:
 		update_preview(delta)
 
 func target_position() -> Vector3:
@@ -247,17 +253,20 @@ func update_preview(delta: float) -> void:
 	valid = _clearance.clear(pose)
 
 func installation_candidate() -> MechanicalMount:
-	if not is_grabbing() or not _grab is MechanicalComponent or _supported:
+	if input_suspended or not is_grabbing() or not _grab is MechanicalComponent or _supported:
 		return null
 	var closest: MechanicalMount
 	var best_distance := INF
 	for node in get_tree().get_nodes_in_group(&"mechanical_mounts"):
 		var socket := node as MechanicalMount
-		var gap := _grab.global_position.distance_squared_to(socket.global_position)
-		if gap < best_distance and socket.installation_error(_grab).is_empty():
+		var gap := socket.mating_distance_squared(_grab)
+		if gap < best_distance and socket.can_acquire(_grab, gap):
 			closest = socket
 			best_distance = gap
 	return closest
+
+func installation_feedback(socket: MechanicalMount) -> String:
+	return socket.installation_error(_grab)
 
 func install_grab() -> bool:
 	var socket := installation_candidate()
@@ -275,6 +284,8 @@ func install_grab() -> bool:
 	return true
 
 func confirm() -> bool:
+	if input_suspended:
+		return false
 	if is_grabbing():
 		if not _supported and not _clearance.clear(_grab.global_transform):
 			valid = false

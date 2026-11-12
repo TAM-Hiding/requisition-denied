@@ -74,7 +74,9 @@ Inspect the auxiliary generator to see its installed parts and available power
 stage. Use **E → Remove** on the service panel, then move the loose panel clear
 of the bay before removing the power module. Move each loose component with the
 existing precision controls. Align it with its mount and press **E** when
-**Install** appears. **G** still places the part loose in the world. Reinstall
+**Install** appears. A nearby compatible mount can ask you to move closer or
+rotate before installation is available. **G** still places the part loose in
+the world. Reinstall
 the module before closing the service panel.
 
 The independent bracket fixture uses the same system with tighter tolerances.

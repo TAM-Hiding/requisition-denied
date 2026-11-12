@@ -154,6 +154,7 @@ func run() -> void:
 		ui._notification(Node.NOTIFICATION_APPLICATION_FOCUS_OUT)
 		input_action(&"interact", false)
 		check(not ui.menu_open and not ui.e_pending and wrench.state == InteractableObject.State.HELD, "Focus loss cancels E gesture")
+		ui._notification(Node.NOTIFICATION_APPLICATION_FOCUS_IN)
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		otis.position = Vector3(0, 0.02, 3)
 		otis.camera.rotation = Vector3.ZERO
@@ -176,7 +177,9 @@ func run() -> void:
 		await aim_at(crate)
 		check(request(&"move", crate).ok, "Move restarts")
 		ui._notification(Node.NOTIFICATION_APPLICATION_FOCUS_OUT)
-		check(not otis.placement.is_grabbing() and not crate.freeze, "Focus loss releases Move")
+		check(otis.placement.is_grabbing() and crate.freeze and otis.placement.input_suspended, "Focus loss suspends Move")
+		ui._notification(Node.NOTIFICATION_APPLICATION_FOCUS_IN)
+		otis.placement.cancel()
 	facility.queue_free()
 	await process_frame
 	print("RD-002: %d checks, %d failures" % [checks, failures])
