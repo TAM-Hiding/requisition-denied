@@ -68,6 +68,23 @@ placement for equipped items, which return to equipment on Escape. Overweight
 objects drag horizontally under gravity. The plate measures suspended weight
 through Otis's contact with the floor.
 
+## Mechanical assembly
+
+Inspect the auxiliary generator to see its installed parts and available power
+stage. Use **E → Remove** on the service panel, then move the loose panel clear
+of the bay before removing the power module. Move each loose component with the
+existing precision controls. Align it with its mount and press **E** when
+**Install** appears. **G** still places the part loose in the world. Reinstall
+the module before closing the service panel.
+
+The independent bracket fixture uses the same system with tighter tolerances.
+Mount definitions carry the mating pose, compatibility tags, access
+dependencies, joint metadata and optional failure strength. Fixed attachments
+use the original rigid body. Revolute and prismatic connections are available
+as definition data. Power stages describe consumer compatibility. Visual meshes
+can be replaced independently of colliders and mounting data, including future
+glTF or GLB assets.
+
 ## Structure
 
 - `scenes/facility.tscn`: project entry point, Otis and interaction UI.

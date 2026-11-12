@@ -37,8 +37,8 @@ func run() -> void:
 	var service := InteractionService.new()
 	check(otis != null and otis.camera.current, "Otis and active camera exist")
 	for kind in ["Crate", "Generator", "Terminal"]:
-		var object := facility.get_node(kind) as InteractableObject
-		otis.position = Vector3(object.position.x, 0.01, object.position.z + 2.5)
+		var object := (facility.get("generator") if kind == "Generator" else facility.get_node(kind)) as InteractableObject
+		otis.position = Vector3(object.global_position.x, 0.01, object.global_position.z + 2.5)
 		otis.velocity = Vector3.ZERO
 		otis.camera.look_at(object.global_position)
 		await physics_frame
@@ -51,12 +51,13 @@ func run() -> void:
 		check(otis.knowledge.has_inspected(object.definition.object_id), "Inspection recorded")
 		ui.perform_action(&"inspect")
 		check(otis.knowledge.records_for(object.definition.object_id).size() == 1, "Identical inspections deduplicated")
+		var initial_description: String = object.inspection_information().description
 		var records := otis.knowledge.records_for(object.definition.object_id)
 		records[0]["description"] = "tampered"
-		check(otis.knowledge.records_for(object.definition.object_id)[0].description == object.definition.description, "Knowledge reads are isolated snapshots")
+		check(otis.knowledge.records_for(object.definition.object_id)[0].description == initial_description, "Knowledge reads are isolated snapshots")
 		var old_description := object.definition.description
 		object.definition.description = "Changed world"
-		check(otis.knowledge.records_for(object.definition.object_id)[0].description == old_description, "World does not rewrite knowledge")
+		check(otis.knowledge.records_for(object.definition.object_id)[0].description == initial_description, "World does not rewrite knowledge")
 		object.definition.description = old_description
 		check(not service.request(&"activate", otis, otis.camera, object, 3, otis.knowledge).ok, "Unavailable action rejected")
 		otis.position.z += 4
@@ -78,8 +79,8 @@ func run() -> void:
 	for motion in [Vector3(0, -2, 0), Vector3(0, 6, 0), Vector3(20, 0, 0), Vector3(-20, 0, 0), Vector3(0, 0, 20), Vector3(0, 0, -20)]:
 		check(otis.test_move(otis.global_transform, motion), "Room collision: " + str(motion))
 	for kind in ["Crate", "Generator", "Terminal"]:
-		var object := facility.get_node(kind) as InteractableObject
-		otis.position = object.position + Vector3(0, -0.3, 2)
+		var object := (facility.get("generator") if kind == "Generator" else facility.get_node(kind)) as InteractableObject
+		otis.position = object.global_position + Vector3(0, -0.3, 2)
 		await physics_frame
 		check(otis.test_move(otis.global_transform, Vector3(0, 0, -3)), "Object collision: " + kind)
 	var debug_event := InputEventAction.new()

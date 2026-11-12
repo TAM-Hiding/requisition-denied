@@ -246,6 +246,34 @@ func update_preview(delta: float) -> void:
 	item.global_transform = pose
 	valid = _clearance.clear(pose)
 
+func installation_candidate() -> MechanicalMount:
+	if not is_grabbing() or not _grab is MechanicalComponent or _supported:
+		return null
+	var closest: MechanicalMount
+	var best_distance := INF
+	for node in get_tree().get_nodes_in_group(&"mechanical_mounts"):
+		var socket := node as MechanicalMount
+		var gap := _grab.global_position.distance_squared_to(socket.global_position)
+		if gap < best_distance and socket.installation_error(_grab).is_empty():
+			closest = socket
+			best_distance = gap
+	return closest
+
+func install_grab() -> bool:
+	var socket := installation_candidate()
+	if socket == null:
+		grab_feedback.emit("Align with a clear compatible mount first.")
+		return false
+	var issue := socket.install(_grab)
+	if not issue.is_empty():
+		grab_feedback.emit(issue)
+		return false
+	_grab = null
+	actor.equipment.presentation.request_pose(HeldItemPresentation.Pose.NORMAL)
+	cancel()
+	grab_feedback.emit("Installed at %s." % socket.definition.mount_id)
+	return true
+
 func confirm() -> bool:
 	if is_grabbing():
 		if not _supported and not _clearance.clear(_grab.global_transform):

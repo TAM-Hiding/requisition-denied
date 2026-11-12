@@ -52,7 +52,7 @@ func run() -> void:
 	check(InputMap.action_get_events("equip_first")[0].physical_keycode == KEY_1, "1 binding")
 	check(is_equal_approx(otis.interact_hold_threshold, 0.35), "Hold threshold default")
 	for kind in ["Generator", "Terminal"]:
-		var fixed := facility.get_node(kind) as InteractableObject
+		var fixed := (facility.get("generator") if kind == "Generator" else facility.get_node(kind)) as InteractableObject
 		await aim_at(fixed)
 		check(fixed.freeze and fixed.mobility() == ObjectDefinition.Mobility.FIXED, "Fixed body remains fixed")
 		check(not fixed.query_actions().has(&"pick_up") and not fixed.query_actions().has(&"move"), "Fixed actions exclude manipulation")
@@ -69,17 +69,18 @@ func run() -> void:
 	check(not crate.freeze and crate.state == InteractableObject.State.WORLD, "Cancellation returns ordinary physics")
 	check(crate.query_actions().has(&"move"), "Move action returns after release")
 	# Runtime mobility override is instance-local; no definition rewrite.
-	var generator := facility.get_node("Generator") as InteractableObject
-	await aim_at(generator)
-	ui.open_menu(generator)
-	check(generator.set_mobility(ObjectDefinition.Mobility.MOVABLE), "World instance can change mobility")
-	check(generator.query_actions().has(&"move") and not generator.freeze, "Runtime mobility controls actions and physics")
+	var generator := facility.get("generator") as MechanicalComponent
+	check(not generator.set_mobility(ObjectDefinition.Mobility.MOVABLE) and generator.freeze,
+		"Installed floor connection prevents runtime mobility changes")
+	await aim_at(crate)
+	ui.open_menu(crate)
+	check(crate.set_mobility(ObjectDefinition.Mobility.FIXED), "Loose instance can change mobility")
 	await frames(2)
-	check(ui.menu_actions.has(&"move"), "Open menu refreshes after mobility changes")
-	check(generator.definition.mobility == ObjectDefinition.Mobility.FIXED, "Definition remains unchanged")
-	check(generator.set_mobility(ObjectDefinition.Mobility.FIXED) and generator.freeze, "Runtime mobility can return to fixed")
+	check(not ui.menu_actions.has(&"move"), "Open menu refreshes after mobility changes")
+	check(crate.definition.mobility == ObjectDefinition.Mobility.MOVABLE, "Definition remains unchanged")
+	check(crate.set_mobility(ObjectDefinition.Mobility.MOVABLE) and not crate.freeze, "Loose instance can return to movable")
 	await frames(2)
-	check(not ui.menu_actions.has(&"move"), "Open menu removes stale Move action")
+	check(ui.menu_actions.has(&"move"), "Open menu restores Move for a loose movable body")
 	ui.close_menu()
 	await aim_at(wrench)
 	check(request(&"inspect", wrench).ok, "Wrench inspection works before pickup")
@@ -110,7 +111,7 @@ func run() -> void:
 	check(not equipment.equip_first().ok, "Retrieve cannot duplicate equipped reference")
 	check(wrench.get_instance_id() == instance_id and wrench.definition.object_id == object_id, "Identity persists through equipment transitions")
 	# Candidate volumes and camera ray prevent dropping through wall or into actor.
-	otis.position = Vector3(0, 0.02, -5.65)
+	otis.position = Vector3(-2, 0.02, -5.65)
 	otis.rotation = Vector3.ZERO
 	otis.camera.rotation = Vector3.ZERO
 	await frames(3)

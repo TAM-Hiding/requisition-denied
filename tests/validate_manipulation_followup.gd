@@ -118,11 +118,11 @@ func run() -> void:
 	check(otis.equipment.pick_up(wrench).ok and wrench.get_instance_id() == identity, "Same instance picked up again")
 	# Preserve the user's confirmed surface placements on both fixtures.
 	for kind in ["Crate", "Generator"]:
-		var object := facility.get_node(kind) as InteractableObject
+		var object := (facility.get("generator") if kind == "Generator" else facility.get_node(kind)) as InteractableObject
 		var collider := object.get_node("CollisionShape3D") as CollisionShape3D
-		var top: float = object.position.y + collider.shape.size.y * 0.5
-		otis.position = Vector3(object.position.x, 0.02, object.position.z + 1.5)
-		otis.camera.look_at(Vector3(object.position.x, top + 0.15, object.position.z + 0.35))
+		var top: float = object.global_position.y + collider.shape.size.y * 0.5
+		otis.position = Vector3(object.global_position.x, 0.02, object.global_position.z + 1.5)
+		otis.camera.look_at(Vector3(object.global_position.x, top + 0.15, object.global_position.z + 0.35))
 		await frames(3)
 		check(otis.equipment.drop().ok, "Clear drop onto " + kind)
 		await frames(90)

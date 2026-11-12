@@ -19,6 +19,11 @@ func request(action: StringName, actor: Node3D, camera: Camera3D,
 		return {"ok": false, "message": "Object is no longer within reach or sight."}
 	if not target.query_actions().has(action):
 		return {"ok": false, "message": "Action unavailable."}
+	if action == &"remove" and target is MechanicalComponent:
+		if actor is OtisController and actor.placement.is_active():
+			return {"ok": false, "message": "Place or cancel the current object first."}
+		var issue: String = target.installed_mount.remove()
+		return {"ok": issue.is_empty(), "message": issue}
 	if action in [&"pick_up", &"move"]:
 		if not actor is OtisController:
 			return {"ok": false, "message": "Actor has no equipment controller."}

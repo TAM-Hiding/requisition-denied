@@ -95,13 +95,14 @@ func _physics_process(delta: float) -> void:
 	if get_parent().terminal_session.active:
 		return
 	var placing := otis.placement.is_active()
+	var socket := otis.placement.installation_candidate()
 	if placing:
 		help.text = "Wheel Range  •  G Place  •  Esc Cancel"
 		if not otis.placement.is_supported_grab():
 			help.text += "  •  Hold Middle Mouse Rotate"
 	else:
 		help.text = "WASD Move  •  E Context  •  Hold E Stow  •  1 Equip  •  G Drop / hold to place or grab  •  Esc Cursor  •  F3 Debug"
-	status.visible = not placing or not otis.placement.valid
+	status.visible = not placing or not otis.placement.valid or socket != null
 	advance_hold(delta)
 	if gameplay_input_allowed():
 		otis.placement.advance_drop()
@@ -134,6 +135,8 @@ func _physics_process(delta: float) -> void:
 		prompt.text = "Left-click to resume"
 	elif otis.placement.is_supported_grab():
 		prompt.text = "SUPPORTED GRAB"
+	elif socket != null:
+		prompt.text = "[E] Install  •  %s" % socket.definition.mount_id
 	elif placing:
 		var placement := otis.placement
 		prompt.text = "%s  |  %s" % [
@@ -227,6 +230,8 @@ func _input(event: InputEvent) -> void:
 
 func handle_placement_controls(event: InputEvent) -> bool:
 	if event.is_action("interact") or event.is_action("equip_first"):
+		if event.is_action_pressed("interact") and otis.placement.installation_candidate() != null:
+			otis.placement.install_grab()
 		return true
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_MIDDLE:
@@ -295,7 +300,7 @@ func rebuild_actions() -> void:
 		var button := Button.new()
 		button.text = String(action).replace("_", " ").capitalize()
 		var use_terminal: bool = action == &"use_terminal" and get_parent().terminal_session.is_target(menu_target)
-		button.disabled = action not in [&"inspect", &"pick_up", &"move"] and not use_terminal
+		button.disabled = action not in [&"inspect", &"pick_up", &"move", &"remove"] and not use_terminal
 		if button.disabled:
 			button.text += " — unavailable in RD-002"
 		button.pressed.connect(perform_action.bind(action))

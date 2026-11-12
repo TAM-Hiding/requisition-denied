@@ -4,7 +4,8 @@
 script = ExtResource("1")
 object_id = &"RD-GEN-001"
 display_name = "Auxiliary generator"
-description = "A compact backup generator. The status panel is dark; no vibration or running machinery is apparent."
+description = "A stationary industrial auxiliary generator with a removable service panel."
 mass_kg = 240.0
-condition = "Offline"
-available_actions = Array[StringName]([&"inspect", &"activate"])
+mobility = 1
+condition = "Intact"
+available_actions = Array[StringName]([&"inspect"])
