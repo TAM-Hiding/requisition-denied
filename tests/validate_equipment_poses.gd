@@ -80,7 +80,7 @@ func run() -> void:
 		actor.camera.rotation.x = deg_to_rad(45 if angle % 90 == 0 else -45)
 		presentation.update_pose(0.0083)
 		check(clear_volume(actor, item), "Lowered pose remains collision-aware on rapid turn %d" % angle)
-	check(actor.manipulation.stop_move().ok, "Release environmental object")
+	check(actor.placement.confirm(), "Release environmental object")
 	check(presentation.requested_pose == HeldItemPresentation.Pose.NORMAL and presentation.pose_blend > 0.99, "Release requests NORMAL without ownership change or snap")
 	actor.position = Vector3(3, 0.02, -3)
 	actor.rotation = Vector3.ZERO
@@ -91,10 +91,10 @@ func run() -> void:
 	actor.position = Vector3(crate.position.x, 0.02, crate.position.z + 2.2)
 	actor.camera.look_at(crate.global_position)
 	for cycle in range(8):
-		check(actor.manipulation.begin_move(crate).ok, "Repeated manipulation starts: %d" % cycle)
+		check(actor.placement.begin_world(crate), "Repeated manipulation starts: %d" % cycle)
 		for frame in range(8):
 			presentation.update_pose(0.0167)
-		actor.manipulation.stop_move()
+		actor.placement.cancel()
 		for frame in range(8):
 			presentation.update_pose(0.0167)
 	check(item.get_instance_id() == identity and actor.equipment.held_item() == item and actor.equipment.stored_items().is_empty(), "Repeated pose reversals preserve one equipped instance")

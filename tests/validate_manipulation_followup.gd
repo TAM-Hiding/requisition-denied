@@ -133,12 +133,10 @@ func run() -> void:
 	await aim_at(crate)
 	check(service.request(&"move", otis, otis.camera, crate, 3, otis.knowledge).ok, "Move action allowed with equipped wrench")
 	check(otis.equipment.held_item() == wrench and wrench.state == InteractableObject.State.HELD, "Move does not stow/drop/duplicate equipment")
-	check(otis.manipulation.effective_speed(otis.movement_speed) < crate.move_speed, "Manipulation speed leaves tracking headroom")
-	check(otis.manipulation.minimum_separation() > 0.95, "Separation accounts for both collision bodies")
-	check(otis.manipulation.stop_move().ok and otis.equipment.held_item() == wrench, "Release preserves equipped item")
-	check(is_equal_approx(otis.manipulation.effective_speed(otis.movement_speed), otis.movement_speed), "Normal speed returns after release")
+	check(otis.placement.load_fraction() > 0.0, "Suspended load applies chassis movement penalties")
+	check(otis.placement.confirm() and otis.equipment.held_item() == wrench, "Placement preserves equipped item")
+	check(otis.placement.load_fraction() == 0.0, "Placement removes movement penalty")
 	if DisplayServer.get_name() != "headless":
-		await pushing_regression(crate)
 		# Save the close-wall view after the motion test, before teardown.
 		otis.set_physics_process(false)
 		otis.position = Vector3(3, 0.02, -5.25)
@@ -153,51 +151,3 @@ func run() -> void:
 	await process_frame
 	print("RD-002 follow-up: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures else 0)
-
-func pushing_regression(crate: InteractableObject) -> void:
-	otis.position = Vector3(crate.position.x, 0.02, crate.position.z + 2.2)
-	otis.rotation = Vector3.ZERO
-	otis.camera.look_at(crate.global_position)
-	otis.velocity = Vector3.ZERO
-	otis.set_physics_process(true)
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	await frames(3)
-	check(service.request(&"move", otis, otis.camera, crate, 3, otis.knowledge).ok, "Forward push begins with held item")
-	var distance := otis.manipulation.intended_distance()
-	var original_speed := otis.movement_speed
-	var minimum_gap: float = INF
-	var contacts: int = 0
-	var max_speed: float = 0
-	var reversals: int = 0
-	var previous_z := crate.position.z
-	var start_z := crate.position.z
-	Input.action_press("move_forward")
-	for frame in range(100):
-		await physics_frame
-		var gap := Vector2(crate.position.x - otis.position.x, crate.position.z - otis.position.z).length()
-		minimum_gap = minf(minimum_gap, gap)
-		max_speed = maxf(max_speed, Vector2(otis.velocity.x, otis.velocity.z).length())
-		if crate.position.z > previous_z + 0.005:
-			reversals += 1
-		previous_z = crate.position.z
-		for index in range(otis.get_slide_collision_count()):
-			if otis.get_slide_collision(index).get_collider() == crate:
-				contacts += 1
-	Input.action_release("move_forward")
-	print("Push metrics: min gap=%.3f m, contacts=%d, max player speed=%.3f m/s, crate reversals=%d" % [minimum_gap, contacts, max_speed, reversals])
-	check(crate.position.z < start_z - 1, "Forward push moves crate deliberately")
-	check(contacts == 0 and reversals == 0, "Forward push has no player/crate contact correction or backwards oscillation")
-	check(minimum_gap >= otis.manipulation.minimum_separation() - 0.03, "Minimum separation maintained through forward push")
-	check(max_speed <= otis.manipulation.effective_speed(original_speed) + 0.01, "Player cannot outrun crate drive")
-	check(is_equal_approx(distance, otis.manipulation.intended_distance()), "Intended distance never ratchets due to motion")
-	# Continue into the north wall; no collision bypass or player/crate shoving.
-	Input.action_press("move_forward")
-	await frames(220)
-	Input.action_release("move_forward")
-	check(crate.position.z > -5.4 and otis.position.z > crate.position.z + 1.35, "Wall stops crate and player holds separation")
-	check(otis.manipulation.moving_object() == crate, "Blocked push remains controlled")
-	check(otis.equipment.held_item() == wrench and wrench.state == InteractableObject.State.HELD, "Equipment unchanged throughout push")
-	otis.manipulation.stop_move()
-	check(is_equal_approx(otis.movement_speed, original_speed) and is_equal_approx(otis.manipulation.effective_speed(original_speed), original_speed), "Release restores normal configured movement speed")
-	# Resume ordinary equipment shortcuts after manipulation, preserving identity.
-	check(service.request_actor_action(&"stow", otis).ok and service.request_actor_action(&"equip_first", otis).ok, "Equipment controls still work after manipulation")

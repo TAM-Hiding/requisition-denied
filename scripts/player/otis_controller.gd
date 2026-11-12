@@ -13,7 +13,6 @@ var acceleration: float:
 @export var gravity: float = 9.8
 @export var interact_hold_threshold: float = 0.35
 var equipment: EquipmentController
-var manipulation: EnvironmentalManipulation
 var knowledge := PlayerKnowledge.new()
 var controls_enabled: bool = true
 @onready var placement: PrecisionPlacement = $PrecisionPlacement
@@ -24,16 +23,9 @@ func _ready() -> void:
 	equipment = EquipmentController.new()
 	equipment.name = "Equipment"
 	add_child(equipment)
-	manipulation = EnvironmentalManipulation.new()
-	manipulation.name = "EnvironmentalManipulation"
-	add_child(manipulation)
-	manipulation.equipment_pose_requested.connect(equipment.presentation.request_pose)
 
 func supporting_load_kg() -> float:
 	return body_mass_kg + placement.suspended_mass_kg()
-
-func controls_world_object() -> bool:
-	return manipulation.moving_object() != null or placement.is_grabbing()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
@@ -44,10 +36,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		camera.rotation.x = clampf(camera.rotation.x - event.relative.y * mouse_sensitivity, -1.5, 1.5)
 
 func _physics_process(delta: float) -> void:
-	if manipulation.can_process():
-		manipulation.prepare_movement()
-	var speed := manipulation.effective_speed(movement_speed) * (1.0 - 0.25 * placement.load_fraction())
-	var movement_acceleration := manipulation.effective_acceleration(acceleration) * (1.0 - 0.30 * placement.load_fraction())
+	var speed := movement_speed * (1.0 - 0.25 * placement.load_fraction())
+	var movement_acceleration := acceleration * (1.0 - 0.30 * placement.load_fraction())
 	var direction := Vector3.ZERO
 	if controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		var axis := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
@@ -62,10 +52,7 @@ func _physics_process(delta: float) -> void:
 		velocity.y -= gravity * delta
 	else:
 		velocity.y = 0
-	velocity = manipulation.constrain_velocity(velocity, delta)
 	move_and_slide()
-	if manipulation.can_process():
-		manipulation.update_goal()
 
 func target_hit() -> Dictionary:
 	var query := PhysicsRayQueryParameters3D.create(camera.global_position,

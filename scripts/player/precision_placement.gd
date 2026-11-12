@@ -2,9 +2,8 @@ class_name PrecisionPlacement
 extends Node
 ## Both interaction lifecycles share the same camera-relative placement solver.
 signal grab_feedback(message: String)
-const GRAB_THRESHOLD_USEC := 200000
+const HOLD_THRESHOLD_USEC := 200000
 const MIN_RESPONSE := 0.30
-@export_range(0.05, 2.0) var hold_seconds := 0.35
 @export var minimum_distance := 0.45
 @export var maximum_distance := 3.0
 @export var initial_distance := 1.35
@@ -37,7 +36,11 @@ func is_supported_grab() -> bool:
 	return is_grabbing() and _supported
 
 func suspended_mass_kg() -> float:
-	return _grab.mass if is_grabbing() and not _supported else 0.0
+	if is_grabbing():
+		return 0.0 if _supported else _grab.mass
+	if actor.equipment.placing and is_instance_valid(actor.equipment.held_item()):
+		return actor.equipment.held_item().mass
+	return 0.0
 
 func load_fraction() -> float:
 	return clampf(suspended_mass_kg() / maxf(lift_capacity(), 0.001), 0.0, 1.0)
@@ -54,30 +57,24 @@ func press_drop(now: int = -1) -> void:
 	_grab_candidate = null
 	if not is_active() and actor.equipment.held_item() == null:
 		var target := actor.target_hit().get("collider") as InteractableObject
-		if is_instance_valid(target) and target.mobility() == ObjectDefinition.Mobility.MOVABLE:
+		if is_instance_valid(target) and target.mobility() != ObjectDefinition.Mobility.FIXED:
 			_grab_candidate = target
 
 func advance_drop(now: int = -1) -> void:
 	if now < 0:
 		now = Time.get_ticks_usec()
-	var threshold := GRAB_THRESHOLD_USEC if is_instance_valid(_grab_candidate) else roundi(hold_seconds * 1000000.0)
-	if _pressed_at < 0 or _hold_consumed or now - _pressed_at < threshold:
+	if _pressed_at < 0 or _hold_consumed or now - _pressed_at < HOLD_THRESHOLD_USEC:
 		return
 	_hold_consumed = true
 	if is_instance_valid(_grab_candidate):
-		_begin_grab(_grab_candidate)
+		begin_world(_grab_candidate)
 	elif not is_active():
 		begin()
 
 func release_drop(now: int = -1) -> void:
-	if is_grabbing():
-		cancel()
-		return
 	if _pressed_at < 0:
 		return
-	# A large object never starts a grab on the key-up event.
-	if not is_instance_valid(_grab_candidate):
-		advance_drop(now)
+	advance_drop(now)
 	var tapped := not _hold_consumed
 	clear_gesture()
 	if tapped:
@@ -93,7 +90,7 @@ func clear_gesture() -> void:
 
 func begin() -> bool:
 	var item := actor.equipment.held_item()
-	if item == null or is_active() or actor.controls_world_object():
+	if item == null or is_active():
 		return false
 	var clearance := PlacementClearance.new()
 	if not clearance.configure(item) or not clearance.clear(item.global_transform, 1):
@@ -109,10 +106,9 @@ func begin() -> bool:
 	valid = false
 	return true
 
-func _begin_grab(item: InteractableObject) -> bool:
-	if (not actor.controls_enabled or actor.controls_world_object() or is_active()
-			or actor.equipment.held_item() != null or not is_instance_valid(item)
-			or item.mobility() != ObjectDefinition.Mobility.MOVABLE
+func begin_world(item: InteractableObject) -> bool:
+	if (is_active() or not is_instance_valid(item)
+			or item.mobility() == ObjectDefinition.Mobility.FIXED
 			or item.state != InteractableObject.State.WORLD or item.freeze
 			or actor.target_hit().get("collider") != item):
 		return false
@@ -140,10 +136,10 @@ func _begin_grab(item: InteractableObject) -> bool:
 	else:
 		# The existing dynamic drag motor only drives the horizontal plane.
 		item.move_goal = item.global_position
-		item.move_velocity = Vector3.ZERO
 		item.move_speed_scale = MIN_RESPONSE
 		item.state = InteractableObject.State.MOVING
 		item.sleeping = false
+	actor.equipment.presentation.request_pose(HeldItemPresentation.Pose.LOWERED)
 	_grab = item
 	_supported = supported
 	distance = clampf((item.global_position - actor.camera.global_position).dot(-actor.camera.global_basis.z),
@@ -169,6 +165,7 @@ func _release_grab() -> void:
 		item.angular_velocity = Vector3.ZERO
 	item.sleeping = false
 	_supported = false
+	actor.equipment.presentation.request_pose(HeldItemPresentation.Pose.NORMAL)
 
 func cancel() -> void:
 	clear_gesture()
@@ -191,7 +188,10 @@ func adjust_distance(steps: float) -> void:
 func rotate_from_mouse(horizontal: float) -> void:
 	if is_supported_grab():
 		return
-	var response := response_factor(_grab.mass, lift_capacity()) if is_grabbing() else 1.0
+	var item := _grab if is_grabbing() else actor.equipment.held_item()
+	if item == null:
+		return
+	var response := response_factor(item.mass, lift_capacity())
 	_angle = clampf(_angle + horizontal * rotation_speed * response, -PI, PI)
 
 func _physics_process(delta: float) -> void:
@@ -210,7 +210,7 @@ func update_preview(delta: float) -> void:
 	if is_grabbing() and item.mass > lift_capacity():
 		cancel()
 		return
-	var response := response_factor(item.mass, lift_capacity()) if is_grabbing() else 1.0
+	var response := response_factor(item.mass, lift_capacity())
 	var pose := item.global_transform
 	var displacement := (target_position() - pose.origin) * (1.0 - exp(-follow_speed * response * delta))
 	# Let a preview that Otis has walked into escape along a clear world route.
@@ -235,6 +235,13 @@ func update_preview(delta: float) -> void:
 	valid = _clearance.clear(pose)
 
 func confirm() -> bool:
+	if is_grabbing():
+		if not _supported and not _clearance.clear(_grab.global_transform):
+			valid = false
+			grab_feedback.emit("Placement blocked.")
+			return false
+		cancel()
+		return true
 	var item := actor.equipment.held_item()
 	if not actor.equipment.placing or item == null:
 		return false

@@ -25,11 +25,11 @@ godot --path .
 | --- | --- |
 | WASD | Walk |
 | Mouse | Look |
-| E tap | Use the workstation or open an object context menu within 3 m. Release an active Move interaction. |
+| E tap | Use the workstation or open an object context menu within 3 m. Choose Move to start precision manipulation. |
 | Left click | Select a menu action; recapture mouse when no menu is open |
 | Escape | Close the terminal or context menu and resume. Cancel placement or release a grabbed load. Otherwise, release the mouse. |
 | Hold E (0.35 s) | Stow the held item; never also triggers a tap |
-| G tap / hold | Tap to drop or confirm handheld placement. Hold to place an equipped item, or to grab a targeted movable object with empty hands. Release G to let go of a world object. |
+| G tap / hold | Hold for 0.2 s to manipulate an equipped item or a targeted movable object. Release the hold to keep manipulating. Tap G to place, or to drop ordinary equipment when idle. |
 | 1 | Retrieve the first stored item into the active slot |
 | F3 | Toggle developer diagnostics |
 
@@ -58,12 +58,13 @@ Each Facility session generates Otis's physical capabilities within manufacturin
 tolerances. See **Inventory → Unit Diagnostics** at the workstation for maximum
 lift, walking speed, acceleration, and chassis mass.
 
-Look at the storage crate with empty hands and hold **G**. The crate follows
-the camera using the same collision sweeps as precision placement. Scroll to
-adjust range, hold **R** to rotate, and use **Shift** to cycle axes. Release **G**
-or press **Escape** to let go. Loads above capacity use horizontal drag under
-gravity. The **E → Move** action remains available. The plate measures suspended
-weight through Otis's contact with the floor.
+Look at the storage crate with empty hands, hold **G** for 0.2 seconds, then
+release the key. **E → Move** enters the same mode. Scroll to adjust range, hold
+**R** to rotate, and use **Shift** to cycle axes. Tap **G** to place or press
+**Escape** to release the world object. The same hold activates persistent
+placement for equipped items, which return to equipment on Escape. Overweight
+objects drag horizontally under gravity. The plate measures suspended weight
+through Otis's contact with the floor.
 
 ## Structure
 
@@ -73,7 +74,7 @@ weight through Otis's contact with the floor.
 - `data/objects/`: crate, generator, terminal and wrench definitions and their action lists.
 - `scripts/actions/interaction_service.gd`: action permission and execution gate.
 - `scripts/knowledge/player_knowledge.gd`: per-actor learned snapshots, independent of world Resources.
-- `scripts/player/`: chassis, locomotion, equipment, large-object carry, push and drag,
+- `scripts/player/`: chassis, locomotion, equipment, shared precision manipulation, supported drag,
   and the NORMAL/LOWERED presentation poses for handheld items.
 - `scripts/ui/`: contextual HUD, terminal camera and input ownership, and the in-world terminal display.
 - `scripts/administration/`: Facility-owned messages, requisition records and administrative events.
