@@ -126,8 +126,9 @@ clearance failure stage to the Godot console.
 in the project user-data directory and displays its absolute path. On Linux
 the directory defaults to
 `~/.local/share/godot/app_userdata/Requisition Denied/`, subject to
-`XDG_DATA_HOME`. To import, enter the absolute or `user://` snapshot path and
-choose **Import JSON**. Save separately to make it the launch profile.
+`XDG_DATA_HOME`. To import, choose **Browse** or enter the absolute or
+`user://` snapshot path and choose **Import JSON**. Save separately to make
+it the launch profile.
 
 The snapshot uses schema version 1. Older files default missing scale and
 sensitivity fields. Out-of-range scale is rejected and in-range values round

@@ -632,6 +632,10 @@ func terminal_preferences() -> void:
 	file.close()
 	panel.import_snapshot(path)
 	check(panel.message.text.contains("Invalid JSON") and settings.values[key] == 250, "Invalid JSON preserves live preferences")
+	if DisplayServer.get_name() != "headless":
+		panel.browse_requested.emit()
+		check(station.snapshot_picker_visible(), "CRT Development retains a snapshot file chooser")
+		station._snapshot_picker.hide()
 	var before := tool.rounds.duplicate()
 	var click := InputEventMouseButton.new()
 	click.button_index = MOUSE_BUTTON_LEFT

@@ -1,5 +1,7 @@
 class_name MechanicalSettingsPanel
 extends VBoxContainer
+
+signal browse_requested
 ## CRT controls over the existing live configuration and JSON storage.
 const SECTIONS := ["CONTROLS", "MECHANICS", "VISUALS", "DEVELOPMENT"]
 const INSTALLATION_LABELS := {
@@ -82,6 +84,7 @@ func _ready() -> void:
 	import_path.size_flags_horizontal = SIZE_EXPAND_FILL
 	import_row.add_child(import_path)
 	import_path.text_submitted.connect(import_snapshot)
+	add_button(import_row, "BROWSE", func() -> void: browse_requested.emit())
 	add_button(import_row, "IMPORT JSON", func() -> void: import_snapshot(import_path.text))
 
 	message.add_theme_font_size_override("font_size", 17)
@@ -176,5 +179,6 @@ func export_snapshot() -> void:
 	message.text = "Exported to " + path if not path.is_empty() else "Could not write snapshot."
 
 func import_snapshot(path: String) -> void:
-	var issue := settings.load_file(path.strip_edges())
+	import_path.text = path.strip_edges()
+	var issue := settings.load_file(import_path.text)
 	message.text = "Snapshot applied. Save to keep it after restart." if issue.is_empty() else issue

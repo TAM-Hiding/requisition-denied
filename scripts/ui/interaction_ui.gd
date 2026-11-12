@@ -232,6 +232,8 @@ func _input(event: InputEvent) -> void:
 		return
 	var terminal := active_station()
 	if terminal != null:
+		if terminal.snapshot_picker_visible():
+			return
 		if event.is_action("ui_cancel") and event.is_echo():
 			get_viewport().set_input_as_handled()
 			return

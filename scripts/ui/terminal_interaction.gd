@@ -17,6 +17,7 @@ var _service := InteractionService.new()
 var _pointer_inside := false
 var _last_pointer := Vector2.ZERO
 var _pressed_buttons: Dictionary = {}
+var _snapshot_picker: FileDialog
 
 func configure(otis: OtisController, target: InteractableObject, session: AdministrativeSession,
 		surface: MeshInstance3D, view_anchor: Marker3D, display: SubViewport) -> void:
@@ -24,6 +25,15 @@ func configure(otis: OtisController, target: InteractableObject, session: Admini
 	screen_ui = TerminalDisplay.new()
 	_display.add_child(screen_ui)
 	screen_ui.configure(session, _otis, target.definition.object_id)
+	_snapshot_picker = FileDialog.new()
+	_snapshot_picker.title = "Import Mechanical Settings"
+	_snapshot_picker.access = FileDialog.ACCESS_FILESYSTEM
+	_snapshot_picker.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	_snapshot_picker.add_filter("*.json", "Mechanical settings")
+	_snapshot_picker.hide()
+	add_child(_snapshot_picker)
+	_snapshot_picker.file_selected.connect(screen_ui.settings_panel.import_snapshot)
+	screen_ui.settings_panel.browse_requested.connect(open_snapshot_picker)
 
 func configure_ram(otis: OtisController, target: InteractableObject, ram: StructuralTestRam,
 		surface: MeshInstance3D, view_anchor: Marker3D, display: SubViewport) -> void:
@@ -45,6 +55,14 @@ func configure_camera(otis: OtisController, target: InteractableObject,
 	camera.fov = 44.0
 	camera.near = 0.05
 	add_child(camera)
+
+func open_snapshot_picker() -> void:
+	if active:
+		_snapshot_picker.current_dir = ProjectSettings.globalize_path("user://")
+		_snapshot_picker.popup_centered_clamped(Vector2i(720, 490))
+
+func snapshot_picker_visible() -> bool:
+	return _snapshot_picker != null and _snapshot_picker.visible
 
 func is_target(object: InteractableObject) -> bool:
 	return is_instance_valid(object) and object == _target
@@ -76,6 +94,8 @@ func leave() -> void:
 	if not active:
 		return
 	active = false
+	if snapshot_picker_visible():
+		_snapshot_picker.hide()
 	if _transition != null:
 		_transition.kill()
 	if _pointer_inside:
