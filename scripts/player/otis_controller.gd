@@ -9,6 +9,9 @@ var acceleration: float:
 	get: return chassis.effective(AndroidChassis.Attribute.ACCELERATION_MPS2)
 @export var mouse_sensitivity: float = 0.0025
 @export var camera_fov: float = 75.0
+@export var tool_aim_fov: float = 57.0
+@export var tool_aim_sensitivity: float = 0.75
+var tool_aiming := false
 @export var interaction_distance: float = 3.0
 @export var gravity: float = 9.8
 @export var interact_hold_threshold: float = 0.35
@@ -33,10 +36,24 @@ func _unhandled_input(event: InputEvent) -> void:
 			placement.rotate_from_mouse(event.relative)
 			get_viewport().set_input_as_handled()
 			return
-		rotate_y(-event.relative.x * mouse_sensitivity)
-		camera.rotation.x = clampf(camera.rotation.x - event.relative.y * mouse_sensitivity, -1.5, 1.5)
+		var sensitivity := mouse_sensitivity * (tool_aim_sensitivity if tool_aiming else 1.0)
+		rotate_y(-event.relative.x * sensitivity)
+		camera.rotation.x = clampf(camera.rotation.x - event.relative.y * sensitivity, -1.5, 1.5)
+
+func equipped_tool() -> FasteningTool:
+	return equipment.held_item() as FasteningTool if not equipment.placing else null
+
+func set_tool_aiming(active: bool) -> void:
+	tool_aiming = active and equipped_tool() != null
+	equipment.presentation.aim_requested = tool_aiming
+	if tool_aiming:
+		placement.set_rotating(false)
+		placement.pin_workpiece()
 
 func _physics_process(delta: float) -> void:
+	if tool_aiming and (equipped_tool() == null or not controls_enabled or placement.input_suspended):
+		set_tool_aiming(false)
+	camera.fov = move_toward(camera.fov, tool_aim_fov if tool_aiming else camera_fov, delta * 100.0)
 	var speed := movement_speed * (1.0 - 0.25 * placement.load_fraction())
 	var movement_acceleration := acceleration * (1.0 - 0.30 * placement.load_fraction())
 	var direction := Vector3.ZERO
@@ -59,4 +76,7 @@ func target_hit() -> Dictionary:
 	var query := PhysicsRayQueryParameters3D.create(camera.global_position,
 		camera.global_position - camera.global_basis.z * interaction_distance, 5)
 	query.exclude = [get_rid()]
-	return get_world_3d().direct_space_state.intersect_ray(query)
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	if not hit.is_empty() and hit.collider is PhysicsBody3D:
+		hit.collider = FasteningSystem.logical_body(hit.collider, hit.shape)
+	return hit

@@ -32,7 +32,9 @@ var _seating_duration := 0.0
 var _seating_turn_fraction := 0.0
 var _grab_candidate: InteractableObject
 var _grab: InteractableObject
+var _world_anchor: Variant = null
 var _supported := false
+var _supported_was_locked := false
 var _resting_pickup := false
 var input_suspended := false
 var _clearance: PlacementClearance
@@ -69,9 +71,9 @@ func press_drop(now: int = -1) -> void:
 	_pressed_at = Time.get_ticks_usec() if now < 0 else now
 	_hold_consumed = false
 	_grab_candidate = null
-	if not is_active() and actor.equipment.held_item() == null:
+	if not is_active() and (actor.equipment.held_item() == null or actor.equipment.held_item() is FasteningTool):
 		var target := actor.target_hit().get("collider") as InteractableObject
-		if is_instance_valid(target) and target.mobility() != ObjectDefinition.Mobility.FIXED:
+		if is_instance_valid(target) and not target.fastened and target.mobility() != ObjectDefinition.Mobility.FIXED:
 			_grab_candidate = target
 
 func advance_drop(now: int = -1) -> void:
@@ -120,7 +122,7 @@ func begin() -> bool:
 
 func begin_world(item: InteractableObject) -> bool:
 	if (input_suspended or is_active() or not is_instance_valid(item)
-			or item.mobility() == ObjectDefinition.Mobility.FIXED
+			or item.fastened or item.mobility() == ObjectDefinition.Mobility.FIXED
 			or item.state != InteractableObject.State.WORLD or item.freeze
 			or actor.target_hit().get("collider") != item):
 		return false
@@ -142,12 +144,17 @@ func begin_world(item: InteractableObject) -> bool:
 		item.support_carrier = actor
 		_clearance = clearance
 	else:
-		# The existing dynamic drag motor only drives the horizontal plane.
+		# Keep a supported drag planar even with asymmetric compound contacts.
+		# Restore the object's ordinary rotation policy on release.
+		_supported_was_locked = item.lock_rotation
+		item.lock_rotation = true
+		item.angular_velocity = Vector3.ZERO
 		item.move_goal = item.global_position
 		item.move_speed_scale = MIN_RESPONSE
 		item.state = InteractableObject.State.MOVING
 		item.sleeping = false
 	actor.equipment.presentation.request_pose(HeldItemPresentation.Pose.LOWERED)
+	_world_anchor = null
 	_grab = item
 	_supported = supported
 	distance = clampf((item.global_position - actor.camera.global_position).dot(-actor.camera.global_basis.z),
@@ -156,13 +163,25 @@ func begin_world(item: InteractableObject) -> bool:
 	valid = not _resting_pickup
 	return true
 
+func pin_workpiece() -> void:
+	if is_grabbing() and not _supported and not is_seating():
+		_world_anchor = _grab.global_position
+
+func handoff_workpiece(item: InteractableObject) -> bool:
+	if _grab != item or _supported or is_seating() or not _clearance.clear(item.global_transform):
+		return false
+	cancel()
+	return true
+
 func _release_grab() -> void:
 	var item := _grab
 	_grab = null
+	_world_anchor = null
 	item.state = InteractableObject.State.WORLD
 	item.support_carrier = null
 	item.move_speed_scale = 1.0
 	if _supported:
+		item.lock_rotation = _supported_was_locked
 		item.linear_velocity = Vector3(0, item.linear_velocity.y, 0)
 	else:
 		item.lock_rotation = false
@@ -191,6 +210,9 @@ func set_rotating(enabled: bool) -> void:
 	_pending_turns.clear()
 
 func adjust_distance(steps: float) -> void:
+	if _world_anchor != null:
+		distance = clampf(actor.camera.global_position.distance_to(_world_anchor), minimum_distance, maximum_distance)
+		_world_anchor = null
 	distance = clampf(distance + steps * wheel_step, minimum_distance, maximum_distance)
 
 func rotate_from_mouse(relative: Vector2) -> void:
@@ -236,6 +258,8 @@ func _physics_process(delta: float) -> void:
 		update_preview(delta)
 
 func target_position() -> Vector3:
+	if _world_anchor != null:
+		return _world_anchor
 	return actor.camera.global_position - actor.camera.global_basis.z * distance
 
 func update_preview(delta: float) -> void:

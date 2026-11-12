@@ -9,7 +9,8 @@ var menu_open: bool = false
 var prompt: Label
 var help: Label
 var debug_label: Label
-var crosshair: Label
+var crosshair: Control
+var tool_readout: Label
 var panel: PanelContainer
 var menu_items: VBoxContainer
 var title: Label
@@ -40,12 +41,20 @@ func _ready() -> void:
 	help.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	help.position += Vector2(24, -40)
 	hud.add_child(help)
-	crosshair = Label.new()
-	crosshair.text = "·"
-	crosshair.add_theme_font_size_override("font_size", 32)
+	crosshair = Control.new()
+	crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	crosshair.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	crosshair.position += Vector2(-5, -22)
+	crosshair.position -= Vector2(8, 8)
+	crosshair.size = Vector2(16, 16)
+	crosshair.draw.connect(func() -> void:
+		crosshair.draw_circle(crosshair.size * 0.5, 1.8, Color.WHITE, true, -1.0, true))
 	hud.add_child(crosshair)
+	tool_readout = Label.new()
+	tool_readout.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	tool_readout.position += Vector2(-590, 24)
+	tool_readout.size.x = 566
+	tool_readout.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	hud.add_child(tool_readout)
 	prompt = Label.new()
 	prompt.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	prompt.position += Vector2(-180, 25)
@@ -116,16 +125,32 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	if not application_focused or get_parent().terminal_session.active or mechanical_panel.visible:
 		return
+	var tool := otis.equipped_tool()
+	var ram: StructuralTestRam = get_parent().test_ram
+	var aim := {}
+	if tool != null and gameplay_input_allowed():
+		aim = tool.system.probe(otis.camera.global_position, -otis.camera.global_basis.z, FasteningTool.RANGE, otis)
+		tool_readout.text = tool.hud_text() + "\nLMB Use  •  RMB Aim  •  R Mode  •  F8 Grade  •  F9 Refill"
+		if not tool.removing:
+			tool_readout.text += "\n" + ("INSTALL UNI-BOLT" if aim.issue.is_empty() else aim.issue)
+		if ram.drive != StructuralTestRam.Drive.IDLE:
+			tool_readout.text += "\n" + ram.hud_text()
+	elif ram.drive != StructuralTestRam.Drive.IDLE or debug_visible:
+		tool_readout.text = ram.hud_text() + "\nF5 Drive  •  F6 / Shift+F6 Force  •  F7 Reset"
+	else:
+		tool_readout.text = ""
 	var placing := otis.placement.is_active()
 	var socket := otis.placement.installation_candidate()
 	var mount_issue := ""
 	if placing:
 		help.text = "Wheel Range  •  G Place  •  Esc Cancel"
+		if tool == null and otis.placement.is_grabbing():
+			help.text += "  •  1 Equip Tool"
 		if not otis.placement.is_supported_grab():
 			help.text += "  •  Hold Middle Mouse Rotate"
 	else:
 		help.text = "WASD Move  •  E Context  •  Hold E Stow  •  1 Equip  •  G Drop / hold to place or grab  •  Esc Cursor  •  F3 Debug  •  F4 Mechanics"
-	status.visible = not placing or not otis.placement.valid or socket != null
+	status.visible = tool != null or not placing or not otis.placement.valid or socket != null
 	advance_hold(delta)
 	if gameplay_input_allowed():
 		otis.placement.advance_drop()
@@ -194,6 +219,8 @@ func _physics_process(delta: float) -> void:
 
 	if debug_visible:
 		debug_label.text += get_parent().environmental_diagnostics()
+		if tool != null:
+			debug_label.text += tool.system.diagnostics(aim)
 		if otis.placement.mechanical_settings.values.debug.show_alignment_diagnostics:
 			if socket != null:
 				debug_label.text += otis.placement.alignment_diagnostics(socket, mount_issue)
@@ -227,6 +254,11 @@ func _input(event: InputEvent) -> void:
 		if event.is_action_pressed("ui_cancel"):
 			close_mechanical_settings()
 			get_viewport().set_input_as_handled()
+		return
+	if event.is_action_released("tool_secondary_aim"):
+		otis.set_tool_aiming(false)
+	if gameplay_input_allowed() and handle_fastening_input(event):
+		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("debug_overlay"):
 		debug_visible = not debug_visible
@@ -281,12 +313,16 @@ func handle_placement_controls(event: InputEvent) -> bool:
 		return true
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_MIDDLE:
+			if otis.tool_aiming:
+				return true
 			if otis.placement.is_supported_grab():
 				return false
 			otis.placement.set_rotating(event.pressed)
 			return true
 		if not event.pressed:
 			return false
+		if otis.tool_aiming and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+			return true
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			otis.placement.adjust_distance(1)
 			return true
@@ -295,8 +331,51 @@ func handle_placement_controls(event: InputEvent) -> bool:
 			return true
 	return false
 
+func handle_fastening_input(event: InputEvent) -> bool:
+	var tool := otis.equipped_tool()
+	if otis.placement.is_grabbing() and event.is_action_pressed("equip_first") and tool == null:
+		var targeted := otis.target_hit().get("collider") as FasteningTool
+		if otis.equipment.held_item() == null and targeted != null and otis.equipment.stored_items().is_empty():
+			otis.equipment.pick_up(targeted)
+		else:
+			service.request_actor_action(&"equip_first", otis)
+		return true
+	var ram: StructuralTestRam = get_parent().test_ram
+	if event.is_action_pressed("rig_drive"):
+		ram.toggle_drive()
+	elif event.is_action_pressed("rig_force_down", false, true):
+		ram.change_force(-1)
+		show_feedback(ram.hud_text())
+	elif event.is_action_pressed("rig_force_up", false, true):
+		ram.change_force(1)
+		show_feedback(ram.hud_text())
+	elif event.is_action_pressed("rig_reset"):
+		ram.reset_ram()
+	elif tool == null:
+		return false
+	elif event.is_action_pressed("tool_primary"):
+		if not otis.placement.is_seating() and not otis.placement.is_supported_grab():
+			show_feedback(tool.use(otis.camera, otis))
+		else:
+			show_feedback("Finish the current mechanical operation first.")
+	elif event.is_action_pressed("tool_secondary_aim"):
+		otis.set_tool_aiming(true)
+	elif event.is_action_pressed("tool_mode_toggle"):
+		tool.removing = not tool.removing
+		var color := Color("e4b968") if tool.removing else Color("83d6a8")
+		tool.indicator.albedo_color = color
+		tool.indicator.emission = color
+	elif event.is_action_pressed("tool_grade"):
+		tool.load_grade(tool.grade_index + 1)
+	elif event.is_action_pressed("tool_replenish"):
+		tool.replenish()
+	else:
+		return false
+	return true
+
 func set_terminal_active(active: bool) -> void:
 	cancel_hold()
+	otis.set_tool_aiming(false)
 	hud.visible = not active
 
 func gameplay_input_allowed() -> bool:
@@ -379,6 +458,8 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and application_focused:
 		application_focused = false
 		_mouse_mode_before_focus_loss = Input.mouse_mode
+		if is_instance_valid(otis) and is_instance_valid(otis.equipment):
+			otis.set_tool_aiming(false)
 		cancel_hold()
 		if is_instance_valid(otis) and is_instance_valid(otis.placement):
 			otis.placement.set_input_suspended(true)

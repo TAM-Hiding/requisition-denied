@@ -174,6 +174,8 @@ func _detach() -> String:
 	if not is_instance_valid(occupant):
 		return "Mount vacant."
 	var component := occupant
+	if component.fastened:
+		return "Remove freeform fasteners first."
 	if not is_instance_valid(component.loose_parent):
 		return "Component has no world parent."
 	var pose := component.global_transform

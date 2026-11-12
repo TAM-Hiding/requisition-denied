@@ -31,7 +31,7 @@ func result(ok: bool, message: String) -> Dictionary:
 	return {"ok": ok, "message": message}
 
 func pick_up(item: InteractableObject) -> Dictionary:
-	if not is_instance_valid(item) or item.mobility() != ObjectDefinition.Mobility.CARRYABLE or item.state != InteractableObject.State.WORLD:
+	if not is_instance_valid(item) or item.fastened or item.mobility() != ObjectDefinition.Mobility.CARRYABLE or item.state != InteractableObject.State.WORLD:
 		return result(false, "That object cannot be picked up.")
 	if _held != null or _stored.has(item):
 		return result(false, "Free your active equipment slot first.")
@@ -54,6 +54,8 @@ func attach(item: InteractableObject) -> void:
 	item.transform = Transform3D.IDENTITY
 	item.show()
 	presentation.track(item)
+	if item is FasteningTool:
+		actor.placement.pin_workpiece()
 
 func stow() -> Dictionary:
 	if placing:

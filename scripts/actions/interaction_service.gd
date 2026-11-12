@@ -11,7 +11,7 @@ func permitted(actor: Node3D, camera: Camera3D, target: InteractableObject, reac
 	if actor is CollisionObject3D:
 		query.exclude = [actor.get_rid()]
 	var hit := actor.get_world_3d().direct_space_state.intersect_ray(query)
-	return not hit.is_empty() and hit.collider == target
+	return not hit.is_empty() and hit.collider is PhysicsBody3D 		and FasteningSystem.logical_body(hit.collider, hit.shape) == target
 
 func request(action: StringName, actor: Node3D, camera: Camera3D,
 		target: InteractableObject, reach: float, knowledge: PlayerKnowledge) -> Dictionary:
@@ -44,7 +44,10 @@ func request_actor_action(action: StringName, actor: OtisController) -> Dictiona
 	if not is_instance_valid(actor) or actor.equipment == null or not actor.controls_enabled:
 		return {"ok": false, "message": "Equipment unavailable."}
 	if actor.placement.is_active():
-		return {"ok": false, "message": "Place or cancel the current object first."}
+		var stored := actor.equipment.stored_items()
+		if not (action == &"equip_first" and actor.placement.is_grabbing()
+				and not actor.placement.is_seating() and not stored.is_empty() and stored[0] is FasteningTool):
+			return {"ok": false, "message": "Place or cancel the current object first."}
 	match action:
 		&"stow": return actor.equipment.stow()
 		&"equip_first": return actor.equipment.equip_first()

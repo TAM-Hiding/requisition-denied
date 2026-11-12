@@ -144,6 +144,73 @@ The snapshot uses schema version 1.
 }
 ```
 
+## Uni-Bolt™ fastening and structural tests
+
+The installation tool is on the floor ahead and left of Otis's spawn. Stock
+plates, angles, a bar and a gusset are grouped along the southwest side. The
+orange-faced structural test ram is west of the storage crate.
+
+| Input | Action |
+| --- | --- |
+| Left mouse | Install or remove an individual fastener with the tool equipped |
+| Right mouse (hold) | Aim down sights and pin a suspended workpiece at its current world pose |
+| R | Switch INSTALL / REMOVE |
+| 1 during a world grab | Retrieve the stowed tool, or equip a loose tool in reach while looking at it if storage is empty |
+| F5 | Extend or retract the ram |
+| F6 / Shift+F6 | Increase or decrease the ram force limit |
+| F7 | Reset and retract the ram |
+| F8 / F9 | Cycle test grades / refill the selected grade while equipped |
+
+To fasten while holding a part, equip and stow the tool, grab a plate or angle
+with **G**, position it, then press **1**. Equipping and ADS keep the part at
+the world pose it already occupied. You can also start a world grab with the
+tool equipped by aiming at a movable object and holding **G**. After ADS,
+the wheel resumes camera-relative positioning if you need to adjust the
+pinned part. Middle mouse can rotate it at the pin while ADS is off.
+Aim through the part into its backing and click. The first successful bolt
+transfers control to the assembly immediately. Additional clicks at separate
+locations reinforce that body pair. Press **R** and aim at each bolt head to
+remove it. Removing the last bolt on an edge restores ordinary interaction
+where the resulting island is free.
+
+The installation ray follows the center sight. A short second ray along the
+surface normal identifies the backing material and a reverse ray checks that
+the entry body is close to it. A bolt is 152.4 mm long. The tool allows a 25 mm
+maximum gap at the interface and reserves 6 mm of engagement. The crate can be
+anchored through its exposed lower skids by aiming down at them from the side.
+The full crate body is too thick for a through-fastener.
+
+| Grade | Strength units | Finish |
+| --- | ---: | --- |
+| Standard | 100 | Satin steel |
+| Grade 8 | 300 | Polished champagne brass |
+| MegaBolt | 9,999 | Dark bronze with a faint violet identification ring |
+
+The 20-round magazine holds one grade. Intact rounds recover with their
+original IDs and grades. Full or mismatched recoveries go to reserve. The
+development grade selector loads matching reserves before topping up with
+test rounds. Failed bolts leave a visible remnant.
+
+The ram applies a capped impulse to a free specimen and stalls under a fixed
+reaction. Force presets range from 60 to 24,000 units. For a sideways load
+test, put an angle against the narrow reaction web near the end of the ram
+stroke. Leave the free leg projecting into the ram's path. F3 shows body pair,
+depth, group, individual loads and strengths, and recent failures. The ram
+readout includes configured and estimated force, travel, displacement and
+the last failed group. Reset retracts the ram while preserving all damage.
+
+Freeform groups retain original bodies, local attachment transforms and
+individual bolt records. Each connected island uses one simulated compound
+collider. When a group splits, the detached bodies recover their original
+collision and inherit the island's velocity. The load estimate shares direct
+force and adds a moment based on application point, direction and bolt
+spacing. The most overloaded bolt fails first and the surviving bolts are
+evaluated again. Anchored islands use the shortest available path to a fixed
+support. This is an authored gameplay model for ram and explicit test loads.
+Ordinary collisions do not accumulate fastener damage. Compound islands can
+be pushed physically. To precision-grab an individual member, detach it
+first. Fastening data and ammunition remain session-local.
+
 ## Structure
 
 - `scenes/facility.tscn`: project entry point, Otis and interaction UI.
@@ -155,6 +222,7 @@ The snapshot uses schema version 1.
 - `scripts/player/`: chassis, locomotion, equipment, shared precision manipulation, supported drag,
   and the NORMAL/LOWERED presentation poses for handheld items.
 - `scripts/ui/`: contextual HUD, terminal camera and input ownership, and the in-world terminal display.
+- `scripts/fastening/`: physical attachment graph, grade and bolt records, installation tool and ram.
 - `scripts/administration/`: Facility-owned messages, requisition records and administrative events.
 - `tests/`: engine-level validation and startup smoke test.
 

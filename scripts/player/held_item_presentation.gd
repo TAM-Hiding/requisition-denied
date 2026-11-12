@@ -4,6 +4,8 @@ extends Node
 enum Pose { NORMAL, LOWERED }
 var requested_pose: Pose = Pose.NORMAL
 var pose_blend: float = 0.0
+var aim_requested := false
+var aim_blend := 0.0
 var lateral_shift: float = 0.0
 var item: InteractableObject
 var actor: OtisController
@@ -65,7 +67,8 @@ func query(shape: Shape3D, transform: Transform3D, motion: Vector3 = Vector3.ZER
 
 func pose_origin_camera() -> Vector3:
 	var base := actor.camera.to_local(anchor.global_position)
-	return base + profile.lowered_offset * pose_blend
+	var normal := base + profile.lowered_offset * pose_blend
+	return normal.lerp(Vector3(0, -0.093, -0.45), aim_blend) if item is FasteningTool else normal
 
 func retraction_origin_camera(normal: Vector3, amount: float, depth: float = 1.0) -> Vector3:
 	var direction := -1.0 if normal.x >= 0 else 1.0
@@ -97,6 +100,7 @@ func update_pose(delta: float) -> void:
 	var speed: float = profile.pose_transition_speed if profile != null else 8.0
 	var target := 1.0 if requested_pose == Pose.LOWERED else 0.0
 	pose_blend = lerpf(pose_blend, target, 1.0 - exp(-speed * maxf(0, delta)))
+	aim_blend = move_toward(aim_blend, 1.0 if aim_requested else 0.0, maxf(0.0, delta) * 8.0)
 	if absf(pose_blend - target) < 0.0001:
 		pose_blend = target
 	if not is_instance_valid(item) or item.state != InteractableObject.State.HELD:
