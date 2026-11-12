@@ -3,6 +3,7 @@ extends RefCounted
 ## Queries use the original collider and its local offset.
 const SWEEP_MARGIN := 0.008
 const RELEASE_MARGIN := 0.001
+const PICKUP_LIMIT := 0.025
 const MAX_SLIDE_STEPS := 4
 const MOTION_EPSILON := 0.00001
 const CONTACT_PROBE := 0.018
@@ -44,23 +45,79 @@ func query(pose: Transform3D, mask: int, extra_margin: float = 0.0) -> PhysicsSh
 func clear(pose: Transform3D, mask: int = 3, extra_margin: float = 0.0) -> bool:
 	return space.intersect_shape(query(pose, mask, extra_margin), 1).is_empty()
 
-## Ask the physics backend for local contact recovery before taking ownership.
-## A small bound permits separation from resting contacts without relocating a trapped body.
-func pickup_pose(pose: Transform3D) -> Transform3D:
+## Recover only local resting contacts. The body sweep includes the player and world.
+func pickup_pose(pose: Transform3D, debug_failure := false) -> Transform3D:
 	if clear(pose):
 		return pose
-	var query := PhysicsTestMotionParameters3D.new()
-	query.from = pose
-	query.margin = 0.003
-	query.max_collisions = 8
-	query.recovery_as_collision = true
+	var motion := PhysicsTestMotionParameters3D.new()
+	motion.from = pose
+	motion.margin = 0.003
+	motion.max_collisions = 8
+	motion.recovery_as_collision = true
 	var result := PhysicsTestMotionResult3D.new()
-	PhysicsServer3D.body_test_motion(item.get_rid(), query, result)
+	PhysicsServer3D.body_test_motion(item.get_rid(), motion, result)
+	var recovery := result.get_travel()
 	var recovered := pose
-	recovered.origin += result.get_travel()
-	if recovered.origin.distance_to(pose.origin) <= 0.025 and clear(recovered):
+	recovered.origin += recovery
+	if recovery.length() <= PICKUP_LIMIT and clear(recovered):
 		return recovered
+
+	var normals: Array[Vector3] = []
+	var combined := Vector3.ZERO
+	for index in result.get_collision_count():
+		var normal := result.get_collision_normal(index)
+		if not normals.any(func(existing: Vector3) -> bool: return existing.dot(normal) > 0.999):
+			normals.append(normal)
+			combined += normal
+	var directions := normals.duplicate()
+	directions.push_front(combined.normalized())
+	directions.append(Vector3.UP)
+	var attempts: Array[Dictionary] = []
+	motion.recovery_as_collision = false
+	# The backend recovers before sweeping. Short outward alternatives can
+	# clear a second resting contact that the recovery result alone missed.
+	for direction: Vector3 in directions:
+		if direction.is_zero_approx() or normals.any(func(normal: Vector3) -> bool: return direction.dot(normal) < -0.001):
+			continue
+		for length in [0.006, 0.012, 0.018]:
+			motion.motion = direction * length
+			var blocked := PhysicsServer3D.body_test_motion(item.get_rid(), motion, result)
+			var candidate := pose
+			candidate.origin += result.get_travel()
+			var destination := space.intersect_shape(query(candidate, 3), 1)
+			if not blocked and result.get_travel().length() <= PICKUP_LIMIT and destination.is_empty():
+				return candidate
+			if debug_failure:
+				var body: Object
+				if result.get_collision_count() > 0:
+					body = result.get_collider()
+				elif not destination.is_empty():
+					body = destination[0].collider
+				attempts.append({"direction": direction, "destination": candidate.origin,
+					"result": "path" if blocked else "destination" if not destination.is_empty() else "recovery limit",
+					"blocker": _pickup_blocker(body)})
+	if debug_failure:
+		var initial := query(pose, 3)
+		var contacts := space.intersect_shape(initial, 8)
+		initial.margin = 0.0
+		var initial_state := "overlap" if not space.intersect_shape(initial, 1).is_empty() else "clearance margin"
+		var blockers: Array[String] = []
+		for contact in contacts:
+			blockers.append(_pickup_blocker(contact.collider))
+		print("PICKUP BLOCKED ", item.definition.object_id, " ", collider.shape.get_class(),
+			" pose=", pose, " initial=", initial_state, " blockers=", blockers,
+			" recovery_destination=", recovered.origin, " recovery=", recovery, " attempts=", attempts)
 	return pose
+
+static func _pickup_blocker(body: Object) -> String:
+	if not is_instance_valid(body):
+		return "none"
+	var id := str(body.get_instance_id())
+	if body is InteractableObject and body.definition != null:
+		id = String(body.definition.object_id)
+	elif body is Node:
+		id = String(body.name)
+	return "%s (%s #%d)" % [id, body.get_class(), body.get_instance_id()]
 
 func slide(pose: Transform3D, displacement: Vector3, mask: int = 3) -> Transform3D:
 	_contact_normal = Vector3.ZERO

@@ -10,7 +10,10 @@ const MIN_RESPONSE := 0.30
 @export var wheel_step := 0.15
 @export var follow_speed := 20.0
 @export_range(0.001, 0.03, 0.001) var rotation_sensitivity := 0.009
-const TRACKBALL_RADIUS_LIMIT := 2.0
+@export var invert_horizontal_rotation := false
+@export var invert_vertical_rotation := false
+const MAX_TRACKBALL_PACKET := 0.75
+const MAX_PENDING_TURNS := 24
 const MAX_ROTATION_STEP := 0.035
 
 var distance := 1.35
@@ -19,7 +22,8 @@ var valid := false
 var _pressed_at := -1
 var _hold_consumed := false
 var _trackball_cursor := Vector2.ZERO
-var _pending_rotation := Quaternion.IDENTITY
+var _pending_turns: Array[Quaternion] = []
+var pickup_debug := false
 var _grab_candidate: InteractableObject
 var _grab: InteractableObject
 var _supported := false
@@ -118,7 +122,7 @@ func begin_world(item: InteractableObject) -> bool:
 	if not supported:
 		if not clearance.configure(item):
 			return false
-		var pose := clearance.pickup_pose(item.global_transform)
+		var pose := clearance.pickup_pose(item.global_transform, pickup_debug)
 		if not clearance.clear(pose):
 			grab_feedback.emit("The load has no clear pickup path.")
 			return false
@@ -172,7 +176,7 @@ func cancel() -> void:
 func set_rotating(enabled: bool) -> void:
 	rotating = enabled and not input_suspended and is_active() and not is_supported_grab()
 	_trackball_cursor = Vector2.ZERO
-	_pending_rotation = Quaternion.IDENTITY
+	_pending_turns.clear()
 
 func adjust_distance(steps: float) -> void:
 	distance = clampf(distance + steps * wheel_step, minimum_distance, maximum_distance)
@@ -184,15 +188,20 @@ func rotate_from_mouse(relative: Vector2) -> void:
 	if not is_instance_valid(item):
 		return
 	var response := response_factor(item.mass, lift_capacity())
-	var previous := _trackball_cursor
-	var travel := Vector2(relative.x, -relative.y) * rotation_sensitivity * response
-	_trackball_cursor = (previous + travel).limit_length(TRACKBALL_RADIUS_LIMIT)
+	var horizontal := -relative.x if invert_horizontal_rotation else relative.x
+	var vertical := relative.y if invert_vertical_rotation else -relative.y
+	var travel := (Vector2(horizontal, vertical) * rotation_sensitivity * response).limit_length(MAX_TRACKBALL_PACKET)
+	if travel.is_zero_approx() or _pending_turns.size() >= MAX_PENDING_TURNS:
+		return
+	# Recenter the virtual input surface gradually without rotating the body.
+	# The next increment still has room to travel even during a long straight drag.
+	var previous := _trackball_cursor * exp(-travel.length())
+	_trackball_cursor = previous + travel
 	var view_basis := actor.camera.global_basis.orthonormalized()
 	var turn := Quaternion(view_basis * _project_trackball(previous),
 		view_basis * _project_trackball(_trackball_cursor))
-	_pending_rotation = (turn * _pending_rotation).normalized()
-	if _pending_rotation.w < 0.0:
-		_pending_rotation = -_pending_rotation
+	# Preserve the order and direction of input, even across complete turns.
+	_pending_turns.append(turn)
 
 static func _project_trackball(cursor: Vector2) -> Vector3:
 	# A hyperbolic continuation keeps the spherical arc smooth beyond its center.
@@ -236,19 +245,26 @@ func update_preview(delta: float) -> void:
 	if mask == 3 and not rotating:
 		pose = _clearance.accommodate_contact(pose, displacement)
 	for increment in 8:
-		var remaining := _pending_rotation.get_angle()
-		if remaining < 0.0001:
+		if _pending_turns.is_empty():
 			break
+		var pending := _pending_turns[0]
+		var remaining := pending.get_angle()
+		if remaining < 0.0001:
+			_pending_turns.pop_front()
+			continue
 		var step := minf(remaining, MAX_ROTATION_STEP * response)
-		var turn := Quaternion.IDENTITY.slerp(_pending_rotation, step / remaining)
+		var turn := Quaternion.IDENTITY.slerp(pending, step / remaining)
 		var candidate := pose
 		var orientation := Basis(turn) * pose.basis.orthonormalized()
 		candidate.basis = orientation.orthonormalized() * Basis.from_scale(pose.basis.get_scale())
 		if not _clearance.rotation_clear(pose, candidate, step):
-			_pending_rotation = Quaternion.IDENTITY
+			_pending_turns.clear()
 			break
 		pose = candidate
-		_pending_rotation = (turn.inverse() * _pending_rotation).normalized()
+		if step >= remaining:
+			_pending_turns.pop_front()
+		else:
+			_pending_turns[0] = (turn.inverse() * pending).normalized()
 	item.global_transform = pose
 	valid = _clearance.clear(pose)
 

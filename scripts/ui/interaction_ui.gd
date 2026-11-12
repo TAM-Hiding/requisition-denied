@@ -189,6 +189,7 @@ func _input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed("debug_overlay"):
 		debug_visible = not debug_visible
+		otis.placement.pickup_debug = debug_visible
 		debug_label.visible = debug_visible
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("ui_cancel"):

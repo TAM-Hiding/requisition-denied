@@ -68,6 +68,11 @@ placement for equipped items, which return to equipment on Escape. Overweight
 objects drag horizontally under gravity. The plate measures suspended weight
 through Otis's contact with the floor.
 
+Middle-mouse rotation continues across complete revolutions. The
+`PrecisionPlacement` scene node exposes independent horizontal and vertical
+rotation inversion alongside sensitivity. Both inversion flags default off.
+Enable the F3 overlay to log detailed pickup failures to the Godot console.
+
 ## Mechanical assembly
 
 Inspect the auxiliary generator to see its installed parts and available power

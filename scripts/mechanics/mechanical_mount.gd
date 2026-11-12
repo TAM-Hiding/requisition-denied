@@ -38,7 +38,7 @@ func mating_distance_squared(component: MechanicalComponent) -> float:
 	return (component.global_transform * component.profile.mating_transform).origin.distance_squared_to(global_position)
 
 func can_acquire(component: MechanicalComponent, gap_squared: float) -> bool:
-	var radius := maxf(definition.acquisition_distance, definition.position_tolerance)
+	var radius := maxf(definition.acquisition_distance, Vector2(definition.approach_distance, definition.position_tolerance).length())
 	return gap_squared <= radius * radius and compatibility_error(component).is_empty() and access_blocker() == &""
 
 func alignment_error(component: MechanicalComponent) -> String:
@@ -48,9 +48,15 @@ func alignment_error(component: MechanicalComponent) -> String:
 	var blocker := access_blocker()
 	if blocker != &"":
 		return "Clear %s first." % blocker
-	if mating_distance_squared(component) > definition.position_tolerance * definition.position_tolerance:
-		return "Move closer to the mount."
-	if _angle_from(component.global_transform * component.profile.mating_transform) > deg_to_rad(definition.angle_tolerance_degrees):
+	var datum := component.global_transform * component.profile.mating_transform
+	var offset := to_local(datum.origin)
+	var tolerance := definition.position_tolerance
+	if offset.length_squared() > tolerance * tolerance:
+		if offset.z <= 0.0 or offset.z > definition.approach_distance:
+			return "Move closer to the mount."
+		if Vector2(offset.x, offset.y).length_squared() > tolerance * tolerance:
+			return "Center the component on the mount."
+	if _angle_from(datum) > deg_to_rad(definition.angle_tolerance_degrees):
 		return "Align the component with the mount."
 	return ""
 

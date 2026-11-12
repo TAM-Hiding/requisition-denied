@@ -65,6 +65,31 @@ func run() -> void:
 	var basic := PowerConsumerDefinition.new()
 	check(not assembly.supplies(basic), "Unavailable generator cannot supply Stage 1")
 
+	# Clear the extraction corridor before putting unrelated cargo in the bay.
+	module.global_position.x += 0.76
+	module.linear_velocity = Vector3.ZERO
+	# Close the empty mount around unrelated loose cargo, then clear it again.
+	var cargo := facility.get_node("TestWeight") as InteractableObject
+	cargo.global_transform = Transform3D(Basis.IDENTITY, module_mount.global_position + Vector3.DOWN * 0.20)
+	cargo.linear_velocity = Vector3.ZERO
+	cargo.sleeping = false
+	await frames(25)
+	panel.global_transform = panel_mount.global_transform
+	panel.global_position.z += 0.035
+	var panel_issue := panel_mount.install(panel)
+	check(panel_issue.is_empty() and module_mount.occupant == null and assembly.available_stage() == 0,
+		"Panel closes over loose cargo without granting generator power: " + panel_issue)
+	check(panel_mount.remove().is_empty(), "Panel reopens to retrieve unrelated cargo")
+	panel.global_position.x -= 0.95
+	otis.position = Vector3(3.21, 0.01, -0.28)
+	await frames(4)
+	otis.camera.look_at(cargo.global_position)
+	check(otis.placement.begin_world(cargo), "Loose cargo can be retrieved after opening the panel")
+	if otis.placement.is_grabbing():
+		cargo.global_position = Vector3(4.4, 0.14, 2.1)
+		check(otis.placement.confirm(), "Cargo is placed outside the cabinet")
+	check(module_mount.occupant == null and assembly.available_stage() == 0, "Removing cargo leaves the module mount vacant")
+
 	# First place the module at a clear alignment through active world manipulation.
 	await frames(35)
 	otis.position = Vector3(3.21, 0.01, 0.2)
@@ -73,7 +98,24 @@ func run() -> void:
 	check(otis.placement.begin_world(module), "Detached module enters precision manipulation")
 	otis.placement.set_physics_process(false)
 	module.global_transform = module_mount.global_transform
-	module.global_position.z += 0.045
+	check(otis.placement.confirm() and module_mount.occupant == null and assembly.available_stage() == 0,
+		"Ordinary placement inside the bay leaves the module uninstalled")
+	await frames(12)
+	otis.camera.look_at(module.global_position)
+	check(otis.placement.begin_world(module), "Loose module can be regrabbed inside the bay")
+	otis.camera.look_at(otis.camera.global_position + Vector3.RIGHT)
+	otis.placement.distance = 1.4
+	module.global_transform = Transform3D(Basis.IDENTITY, otis.placement.target_position())
+	otis.placement.set_rotating(true)
+	for stroke in [Vector2(42, 21), Vector2(-13, 53), Vector2(35, -36)]:
+		otis.placement.rotate_from_mouse(stroke)
+		for frame in 12:
+			otis.placement.update_preview(1.0 / 60.0)
+	otis.placement.set_rotating(false)
+	check(otis.placement.valid and not module.global_basis.is_equal_approx(Basis.IDENTITY),
+		"Regrabbed module can be rotated freely before alignment and installation")
+	module.global_transform = module_mount.global_transform
+	module.global_position.z += 0.15
 	var obstruction := facility.box(facility, "MountPathObstruction", Vector3(0.1, 0.1, 0.012),
 		module_mount.global_position - Vector3.BACK * 0.155, null, true) as StaticBody3D
 	await frames(2)
@@ -81,7 +123,9 @@ func run() -> void:
 		and otis.placement.is_active(), "A blocked snap keeps the target and original body")
 	obstruction.queue_free()
 	await frames(3)
-	check(otis.placement.installation_candidate() == module_mount, "Aligned module offers contextual Install")
+	check(otis.placement.installation_candidate() == module_mount
+		and otis.placement.installation_feedback(module_mount).is_empty(),
+		"Aligned module offers Install from the clear front insertion approach")
 	if DisplayServer.get_name() == "headless":
 		check(otis.placement.install_grab(), "Explicit Install completes from manipulation")
 	else:
@@ -171,6 +215,8 @@ func run() -> void:
 
 	await grounded_and_focus(otis, ui, bracket_mount, replacement, facility.get_node("Crate"))
 
+	await continuous_rotation(otis, facility.get_node("Wrench"))
+
 	facility.queue_free()
 	await process_frame
 	print("RD-007: %d checks, %d failures" % [checks, failures])
@@ -182,6 +228,27 @@ func grounded_and_focus(otis: OtisController, ui: Node, socket: MechanicalMount,
 	var placement := otis.placement
 	var identity := bracket.get_instance_id()
 	check(socket.remove().is_empty(), "Fixture bracket is loose for pickup recovery")
+	var contact_clearance := PlacementClearance.new()
+	contact_clearance.configure(bracket)
+	var cases := [
+		Transform3D(Basis(Vector3.UP, 0.1628244), Vector3(-4.058261, 0.060767, -2.7)),
+		Transform3D(Basis(Vector3.UP, -0.1301519), Vector3(-4.058175, 0.061064, -2.7)),
+		Transform3D(Basis(Vector3.UP, 0.071304), Vector3(-4.066836, 0.060901, -2.7)),
+	]
+	for pose: Transform3D in cases:
+		var probe := PhysicsTestMotionParameters3D.new()
+		probe.from = pose
+		probe.margin = 0.003
+		probe.max_collisions = 8
+		probe.recovery_as_collision = true
+		var result := PhysicsTestMotionResult3D.new()
+		PhysicsServer3D.body_test_motion(bracket.get_rid(), probe, result)
+		var recovered := pose
+		recovered.origin += result.get_travel()
+		var extracted := contact_clearance.pickup_pose(pose)
+		check(not contact_clearance.clear(recovered) and contact_clearance.clear(extracted)
+			and extracted.origin.distance_to(pose.origin) <= PlacementClearance.PICKUP_LIMIT,
+			"Bounded outward sweep clears a fixture contact that recovery alone misses")
 	var floor_y := 0.059
 	var samples := [
 		Vector3(-3.3, floor_y, -2.7),
@@ -261,3 +328,69 @@ func grounded_and_focus(otis: OtisController, ui: Node, socket: MechanicalMount,
 	ui._notification(Node.NOTIFICATION_APPLICATION_FOCUS_IN)
 	placement.cancel()
 	check(not placement.is_active() and not crate.freeze, "Explicit cancellation still releases after a focus cycle")
+
+
+func continuous_rotation(otis: OtisController, wrench: InteractableObject) -> void:
+	var placement := otis.placement
+	placement.set_physics_process(false)
+	for iteration in 8:
+		var point := Vector3(1.644 - 0.001 * (iteration % 4), 0.039, -2.5)
+		wrench.global_transform = Transform3D(Basis.IDENTITY, point)
+		wrench.linear_velocity = Vector3.ZERO
+		wrench.angular_velocity = Vector3.ZERO
+		wrench.sleeping = iteration % 2 == 0
+		otis.global_position = Vector3(0.55, 0.02, -2.5)
+		await frames(2)
+		otis.camera.look_at(wrench.global_position)
+		check(placement.begin_world(wrench), "Repeated wrench pickup beside generator, iteration %d" % iteration)
+		if placement.is_grabbing():
+			check(placement.confirm(), "Repeated generator-side placement restores physics")
+	otis.global_position = Vector3(0, 0.02, 2.0)
+	wrench.global_transform = Transform3D(Basis.IDENTITY, Vector3(0, 0.05, 0.8))
+	wrench.sleeping = true
+	await frames(2)
+	otis.camera.look_at(wrench.global_position)
+	check(placement.begin_world(wrench), "Wrench can be grabbed before continuous rotation")
+	if not placement.is_grabbing():
+		return
+	otis.camera.look_at(otis.camera.global_position + Vector3.FORWARD)
+	placement.distance = 1.4
+	var neutral := Transform3D(Basis.IDENTITY, placement.target_position())
+	for drag in [Vector2(22, 0), Vector2(0, 22), Vector2(-22, 0)]:
+		wrench.global_transform = neutral
+		placement.set_rotating(true)
+		var axis := Vector3.UP if drag.y == 0 else Vector3.RIGHT
+		var expected_direction := signf(drag.x if drag.y == 0 else drag.y)
+		var accumulated := 0.0
+		var uninterrupted := true
+		for step in 280:
+			var before := wrench.global_basis.get_rotation_quaternion()
+			placement.rotate_from_mouse(drag)
+			placement.update_preview(1.0 / 60.0)
+			var after := wrench.global_basis.get_rotation_quaternion()
+			var change := (after * before.inverse()).normalized()
+			if change.w < 0.0:
+				change = -change
+			var turn := change.get_angle()
+			uninterrupted = uninterrupted and turn > 0.005 and change.get_axis().dot(axis) * expected_direction > 0.99
+			accumulated += turn
+		check(uninterrupted and accumulated > TAU * 3.0, "One uninterrupted drag completes more than three revolutions: " + str(drag))
+		check(placement.valid and wrench.global_basis.is_equal_approx(wrench.global_basis.orthonormalized()),
+			"Continuous turns retain a valid orthonormal orientation")
+	for invert in [Vector2(0, 0), Vector2(1, 0), Vector2(0, 1), Vector2(1, 1)]:
+		placement.invert_horizontal_rotation = invert.x != 0.0
+		placement.invert_vertical_rotation = invert.y != 0.0
+		placement.set_rotating(true)
+		wrench.global_transform = neutral
+		placement.rotate_from_mouse(Vector2(14, 14))
+		placement.update_preview(1.0 / 60.0)
+		var axis := wrench.global_basis.get_rotation_quaternion().get_axis()
+		check(signf(axis.x) == (1.0 if invert.y == 0.0 else -1.0)
+			and signf(axis.y) == (1.0 if invert.x == 0.0 else -1.0), "Independent input inversion: " + str(invert))
+	placement.invert_horizontal_rotation = false
+	placement.invert_vertical_rotation = false
+	check(placement.confirm(), "Compound orientation can be placed")
+	await frames(40)
+	otis.camera.look_at(wrench.global_position)
+	check(placement.begin_world(wrench), "Wrench can be regrabbed after arbitrary placement")
+	placement.cancel()

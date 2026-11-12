@@ -106,6 +106,7 @@ func build_machinery(floor: StaticBody3D, dark: Material, amber: Material) -> vo
 	var cover_spec := mount_spec(&"access_panel", Vector3(0.51, 0.04, 1.07), &"aux_cover", 150.0)
 	var core_spec := mount_spec(&"power_module", Vector3(0.51, 0.04, 0.83), &"aux_power", 500.0)
 	core_spec.requires_vacant = [&"access_panel"]
+	core_spec.approach_distance = 0.18
 	core_spec.required_for_operation = true
 	core_spec.release_offset = Vector3(0, 0, 0.38)
 	var core := mechanical_part(part_definition(&"RD-GEN-CORE", "Power module", 12.0),
