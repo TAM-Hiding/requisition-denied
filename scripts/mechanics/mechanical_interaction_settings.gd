@@ -1,8 +1,16 @@
 class_name MechanicalInteractionSettings
 extends RefCounted
 
+signal changed
+
 const FILE_PATH := "user://mechanical_interaction_settings.json"
 const VERSION := 1
+const VISUAL_SCALE_KEY := "fastener_visual_scale_percent"
+const CONTROL_LIMITS := {
+	"mouse_sensitivity": Vector2(0.0005, 0.01),
+	"precision_rotation_sensitivity": Vector2(0.001, 0.03),
+	"ads_sensitivity_multiplier": Vector2(0.25, 2.0),
+}
 const LIMITS := {
 	"acquisition_distance_m": Vector2(0.10, 0.60),
 	"snap_distance_m": Vector2(0.01, 0.30),
@@ -12,6 +20,12 @@ const LIMITS := {
 }
 const DEFAULTS := {
 	"schema_version": VERSION,
+	"fastener_visual_scale_percent": 100,
+	"controls": {
+		"mouse_sensitivity": 0.0025,
+		"precision_rotation_sensitivity": 0.009,
+		"ads_sensitivity_multiplier": 0.75,
+	},
 	"installation": {
 		"acquisition_distance_m": 0.30,
 		"snap_distance_m": 0.20,
@@ -28,6 +42,7 @@ var values := DEFAULTS.duplicate(true)
 
 func reset() -> void:
 	values = DEFAULTS.duplicate(true)
+	changed.emit()
 
 func load_file(path: String = FILE_PATH) -> String:
 	var file := FileAccess.open(path, FileAccess.READ)
@@ -65,8 +80,25 @@ func apply(candidate: Variant) -> String:
 			validated[section][key] = value
 	if validated.installation.acquisition_distance_m < validated.installation.snap_distance_m:
 		return "Acquisition distance must be at least the snap distance."
+	var scale: Variant = candidate.get(VISUAL_SCALE_KEY, DEFAULTS[VISUAL_SCALE_KEY])
+	if not numeric_in_range(scale, 75.0, 250.0):
+		return "Fastener visual scale must be between 75% and 250%."
+	validated[VISUAL_SCALE_KEY] = roundi(snappedf(float(scale), 5.0))
+	var controls: Variant = candidate.get("controls", {})
+	if not controls is Dictionary:
+		return "Controls must be a settings object."
+	for key: String in CONTROL_LIMITS:
+		var bounds: Vector2 = CONTROL_LIMITS[key]
+		var value: Variant = controls.get(key, DEFAULTS.controls[key])
+		if not numeric_in_range(value, snappedf(bounds.x, 0.00001), snappedf(bounds.y, 0.00001)):
+			return "%s is out of range." % key
+		validated.controls[key] = value
 	values = validated
+	changed.emit()
 	return ""
+
+static func numeric_in_range(value: Variant, minimum: float, maximum: float) -> bool:
+	return typeof(value) in [TYPE_FLOAT, TYPE_INT] and is_finite(float(value)) and value >= minimum and value <= maximum
 
 func save_file(path: String = FILE_PATH) -> String:
 	var temporary := path + ".tmp"

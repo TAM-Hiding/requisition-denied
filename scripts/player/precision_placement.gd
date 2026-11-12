@@ -181,6 +181,9 @@ func resume_workpiece() -> void:
 	_resume_offset = relative + Vector3.BACK * distance
 	_world_anchor = null
 
+func fastening_workpiece() -> InteractableObject:
+	return _grab if is_grabbing() and not _supported and not is_seating() else null
+
 func can_handoff_workpiece(item: InteractableObject) -> bool:
 	return _grab == item and not _supported and not is_seating() and _clearance.clear(item.global_transform)
 

@@ -9,6 +9,7 @@ var connections: Array[FastenerConnection] = []
 var failed: Array[InstalledFastener] = []
 var last_failed_group := 0
 var last_load := 0.0
+var visual_scale := 1.0
 var _next_bolt := 1
 var _issued := {}
 var _installed := {}
@@ -28,14 +29,14 @@ func create_round(grade: FastenerGrade) -> InstalledFastener:
 	return bolt
 
 func compatible(body: PhysicsBody3D, actor: PhysicsBody3D = null) -> bool:
-	if not usable_body(body):
+	if not usable_body(body) or body.has_meta(&"no_fasteners"):
 		return false
 	if body is InteractableObject:
 		var controlled: bool = actor is OtisController and body.state == InteractableObject.State.CARRIED \
 			and body.support_carrier == actor
 		return (body.state == InteractableObject.State.WORLD or controlled) and not body is FasteningTool \
 			and (not body is MechanicalComponent or not is_instance_valid(body.seating_mount))
-	return body is StaticBody3D and not body.has_meta(&"no_fasteners")
+	return body is StaticBody3D
 
 func usable_body(body: Variant) -> bool:
 	return is_instance_valid(body) and body.is_inside_tree() and not body.is_queued_for_deletion()
@@ -57,6 +58,16 @@ func probe(origin: Vector3, direction: Vector3, reach: float, actor: PhysicsBody
 	if not origin.is_finite() or not direction.is_finite() or direction.is_zero_approx() or not is_finite(reach) or reach <= 0.0:
 		return {"issue": "NO TARGET SURFACE"}
 	sync_probes()
+	var workpiece: InteractableObject
+	if actor is OtisController:
+		workpiece = actor.placement.fastening_workpiece()
+		if is_instance_valid(workpiece):
+			if workpiece.state != InteractableObject.State.CARRIED or workpiece.support_carrier != actor \
+					or (workpiece.collision_layer & 1) == 0:
+				return {"issue": "HELD WORKPIECE UNAVAILABLE"}
+			# A carried rigid body is frozen, but precision placement can write
+			# its pose before Godot flushes the transform to Jolt.
+			sync_body_transform(workpiece)
 	var exclude: Array[RID] = []
 	if actor != null:
 		exclude.append(actor.get_rid())
@@ -69,11 +80,14 @@ func probe(origin: Vector3, direction: Vector3, reach: float, actor: PhysicsBody
 	var forward := direction.normalized()
 	var hit := cast(origin, origin + forward * reach, exclude)
 	if hit.is_empty():
-		return {"issue": "NO TARGET SURFACE"}
+		return {"issue": "NO PRIMARY SURFACE · AIM AT WORKPIECE"} if workpiece != null else {"issue": "NO TARGET SURFACE"}
 	var first := hit.collider as PhysicsBody3D
 	var a := logical_body(first)
 	var result := {"issue": "INVALID SURFACE", "a": a, "point": hit.position, "normal": hit.normal}
-	if not is_instance_valid(a) or not compatible(a, actor) or hit.normal.dot(-forward) < 0.5:
+	if not is_instance_valid(a) or not compatible(a, actor):
+		return result
+	if hit.normal.dot(-forward) < 0.5:
+		result.issue = "INVALID APPROACH DIRECTION"
 		return result
 	# The normal sets the drilling direction. Use the exit face and second hit
 	# to enforce both usable length and proximity between the workpieces.
@@ -191,8 +205,8 @@ func install(bolt: InstalledFastener, origin: Vector3, direction: Vector3, reach
 
 func attach_visual(bolt: InstalledFastener, visual: Node3D) -> void:
 	bolt.a.add_child(visual)
-	visual.transform = Transform3D(bolt.local_orientation, bolt.local_a)
 	bolt.visual = visual
+	update_bolt_visual(bolt)
 
 func record_matches(group: FastenerConnection, bolt: InstalledFastener) -> bool:
 	return valid_round(bolt) and _installed.get(bolt.id) == bolt \
@@ -214,7 +228,7 @@ func reconcile() -> void:
 			if not is_instance_valid(bolt.visual) or bolt.visual.is_queued_for_deletion() or bolt.visual.get_parent() != bolt.a:
 				discard_visual(bolt)
 				attach_visual(bolt, make_bolt_visual(bolt))
-			bolt.visual.transform = Transform3D(bolt.local_orientation, bolt.local_a)
+			update_bolt_visual(bolt)
 			bolt.visual.show()
 		if retained.size() != group.bolts.size():
 			group.bolts.assign(retained)
@@ -238,15 +252,31 @@ func _physics_process(_delta: float) -> void:
 	reconcile()
 
 func sync_probes() -> void:
-	# Rigid roots can move or be reparented earlier in the same tick. Push the
-	# current local-to-world transform before excluding the compound collider.
 	for proxy in _proxies:
 		if usable_body(proxy):
-			proxy.force_update_transform()
-			var rid := proxy.get_rid()
-			var current: Transform3D = PhysicsServer3D.body_get_state(rid, PhysicsServer3D.BODY_STATE_TRANSFORM)
-			if not current.is_equal_approx(proxy.global_transform):
-				PhysicsServer3D.body_set_state(rid, PhysicsServer3D.BODY_STATE_TRANSFORM, proxy.global_transform)
+			sync_body_transform(proxy)
+
+func sync_body_transform(body: PhysicsBody3D) -> void:
+	body.force_update_transform()
+	var rid := body.get_rid()
+	var current: Transform3D = PhysicsServer3D.body_get_state(rid, PhysicsServer3D.BODY_STATE_TRANSFORM)
+	if not current.is_equal_approx(body.global_transform):
+		PhysicsServer3D.body_set_state(rid, PhysicsServer3D.BODY_STATE_TRANSFORM, body.global_transform)
+
+func set_visual_scale_percent(percent: int) -> void:
+	visual_scale = clampi(percent, 75, 250) / 100.0
+	for bolt: InstalledFastener in _installed.values():
+		update_bolt_visual(bolt)
+	for bolt in failed:
+		update_bolt_visual(bolt)
+
+func update_bolt_visual(bolt: InstalledFastener) -> void:
+	if not is_instance_valid(bolt.visual):
+		return
+	var scale := Vector3.ONE * visual_scale
+	if bolt.state == InstalledFastener.State.FAILED:
+		scale.z *= 0.35
+	bolt.visual.transform = Transform3D(bolt.local_orientation.scaled_local(scale), bolt.local_a)
 
 func between(a: PhysicsBody3D, b: PhysicsBody3D) -> FastenerConnection:
 	for group in connections:
@@ -271,9 +301,9 @@ func target_bolt(origin: Vector3, direction: Vector3, reach: float, actor: Physi
 			var normal := (bolt.a.global_basis * bolt.local_orientation.z).normalized()
 			if normal.dot(dir) >= -0.1:
 				continue
-			var offset := bolt.head() + normal * 0.008 - origin
+			var offset := bolt.head() + normal * (0.008 * visual_scale) - origin
 			var depth := offset.dot(dir)
-			if depth > 0.0 and depth < limit and (offset - dir * depth).length() < 0.014:
+			if depth > 0.0 and depth < limit and (offset - dir * depth).length() < minf(0.014 * visual_scale, 0.035):
 				limit = depth
 				nearest = bolt
 	return nearest
@@ -300,8 +330,7 @@ func unlink(group: FastenerConnection, bolt: InstalledFastener, broken: bool) ->
 		failed.append(bolt)
 		last_failed_group = group.id
 		# A short, dull remnant marks the failure location.
-		if is_instance_valid(bolt.visual):
-			bolt.visual.scale.z = 0.35
+		update_bolt_visual(bolt)
 	else:
 		discard_visual(bolt)
 		bolt.group_id = 0

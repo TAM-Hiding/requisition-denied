@@ -34,7 +34,6 @@ godot --path .
 | G tap / hold | Hold for 0.2 s to manipulate an equipped item or a targeted movable object. Release the hold to keep manipulating. Tap G to place, or to drop ordinary equipment when idle. |
 | 1 | Retrieve the first stored item into the active slot |
 | F3 | Toggle developer diagnostics |
-| F4 | Open or close Development / Mechanical Interaction |
 
 Movement is suspended while a menu is open or the mouse is released. The menu
 supports keyboard navigation with Tab / arrow keys and Enter. Inspect records
@@ -53,7 +52,7 @@ world physics continues.
   Approvals do not deliver equipment or change access.
 - **Inventory** displays equipment, storage capacity, and Otis's chassis diagnostics.
 - **Records** displays what Otis has learned through inspection.
-- **Settings** controls CRT text brightness for the current session.
+- **Settings** provides controls, mechanics, visuals and development preferences.
 
 ## Chassis and carrying
 
@@ -70,7 +69,7 @@ objects drag horizontally under gravity. The plate measures suspended weight
 through Otis's contact with the floor.
 
 Middle-mouse rotation continues across complete revolutions. Adjust horizontal
-and vertical rotation inversion independently in the F4 panel. The
+and vertical rotation inversion independently in the terminal's **Settings → Controls**. The
 `PrecisionPlacement` scene node still exposes rotation sensitivity and initial
 inversion defaults. Both inversion flags are shipped off.
 
@@ -99,10 +98,14 @@ connections are available as definition data.
 
 ### Mechanical Interaction settings
 
-Press **F4** during first-person gameplay. Values apply live to subsequent
-installation attempts. **Save Settings** persists the profile in
-`user://mechanical_interaction_settings.json`. **Reset to Defaults** restores
-live defaults. Save afterward to keep the reset on restart.
+Press **E** at the administrative CRT and open **Settings**. Controls lists
+bindings and live sensitivity and rotation options. Mechanics holds the
+installation settings below. Visuals includes CRT text brightness and
+**Fastener Visual Scale (%)**, from 75% to 250% in 5% steps, defaulting to 100%.
+It applies immediately to installed heads, shanks, remnants and their selection
+targets. Development contains diagnostics and JSON controls. **Save** persists
+the profile in `user://mechanical_interaction_settings.json`. **Reset Defaults**
+restores live defaults. Save afterward to keep the reset on restart.
 
 | Field | Default | Range |
 | --- | ---: | ---: |
@@ -115,22 +118,30 @@ live defaults. Save afterward to keep the reset on restart.
 Acquisition must be at least as wide as snap distance. The generator retains
 its authored front approach allowance. Clearance checks still apply to all
 mounts. **F3** displays the candidate, distance, axis and key errors, path
-status, and installation eligibility. When enabled in F4, pickup diagnostics
+status, and installation eligibility. When enabled under Development, pickup diagnostics
 also log the original pose, contacts, candidate extraction paths, and
 clearance failure stage to the Godot console.
 
-**Export Snapshot** writes `mechanical_interaction_<timestamp>_<ticks>.json`
+**Export JSON** writes `mechanical_interaction_<timestamp>_<ticks>.json`
 in the project user-data directory and displays its absolute path. On Linux
 the directory defaults to
 `~/.local/share/godot/app_userdata/Requisition Denied/`, subject to
-`XDG_DATA_HOME`. **Import Snapshot** opens a file picker and applies a valid
-file live. Save separately to make it the launch profile.
+`XDG_DATA_HOME`. To import, enter the absolute or `user://` snapshot path and
+choose **Import JSON**. Save separately to make it the launch profile.
 
-The snapshot uses schema version 1.
+The snapshot uses schema version 1. Older files default missing scale and
+sensitivity fields. Out-of-range scale is rejected and in-range values round
+to the nearest 5%.
 
 ```json
 {
   "schema_version": 1,
+  "fastener_visual_scale_percent": 100,
+  "controls": {
+    "mouse_sensitivity": 0.0025,
+    "precision_rotation_sensitivity": 0.009,
+    "ads_sensitivity_multiplier": 0.75
+  },
   "installation": {
     "acquisition_distance_m": 0.3,
     "snap_distance_m": 0.2,
@@ -148,7 +159,12 @@ The snapshot uses schema version 1.
 
 The installation tool is on the floor ahead and left of Otis's spawn. Stock
 plates, angles, a bar and a gusset are grouped along the southwest side. The
-orange-faced structural test ram is west of the storage crate.
+orange-faced structural test ram is west of the storage crate. Approach the
+yellow-trimmed hydraulic pillar beside it and press **E** for **Force −**,
+**Force +**, **Extend**, **Retract**, **Stop**, and **Reset**. The slider jumps
+between force presets from 60 to 24,000. The readout shows actual load, force
+limit, stroke and status. Stop holds the current stroke. Reset retracts the
+ram and preserves damage. F5–F7 remain available as development shortcuts.
 
 | Input | Action |
 | --- | --- |

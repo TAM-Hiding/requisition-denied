@@ -23,18 +23,48 @@ func force_limit() -> float:
 	return FORCE_STEPS[force_index]
 
 func toggle_drive() -> void:
-	drive = Drive.RETRACT if drive == Drive.EXTEND or (drive == Drive.IDLE and travel > 0.0) else Drive.EXTEND
+	var retracting := drive == Drive.EXTEND or (drive == Drive.IDLE and travel > 0.0)
+	set_drive(Drive.RETRACT if retracting else Drive.EXTEND)
+
+func set_drive(command: Drive) -> void:
+	drive = command
+	actual_load = 0.0
+	stalled = false
+
+func handle_shortcut(event: InputEvent) -> bool:
+	if event.is_echo():
+		return false
+	if event.is_action_pressed("rig_drive"):
+		toggle_drive()
+	elif event.is_action_pressed("rig_force_down", false, true):
+		change_force(-1)
+	elif event.is_action_pressed("rig_force_up", false, true):
+		change_force(1)
+	elif event.is_action_pressed("rig_reset"):
+		reset_ram()
+	else:
+		return false
+	return true
+
+func status_text() -> String:
+	if stalled:
+		return "STALLED"
+	match drive:
+		Drive.EXTEND: return "EXTENDING"
+		Drive.RETRACT: return "RETRACTING"
+	return "STOPPED"
 
 func change_force(steps: int) -> void:
-	force_index = clampi(force_index + steps, 0, FORCE_STEPS.size() - 1)
+	set_force_index(force_index + steps)
+
+func set_force_index(index: int) -> void:
+	force_index = clampi(index, 0, FORCE_STEPS.size() - 1)
 
 func reset_ram() -> void:
-	actual_load = 0.0
+	set_drive(Drive.RETRACT)
 	system.last_load = 0.0
-	stalled = false
 	specimen = null
 	displacement = 0.0
-	drive = Drive.RETRACT
 
 func _physics_process(delta: float) -> void:
 	actual_load = 0.0

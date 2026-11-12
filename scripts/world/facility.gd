@@ -11,6 +11,7 @@ var barrier: PoweredBarrier
 var barrier_control: BarrierController
 var administration: AdministrativeSession
 var terminal_session: TerminalInteraction
+var ram_session: TerminalInteraction
 var _barrier_was_blocked := false
 
 
@@ -380,6 +381,7 @@ func build_fastening_station(crate: InteractableObject, dark: Material, amber: M
 	fastening = FasteningSystem.new()
 	fastening.name = "FasteningSystem"
 	add_child(fastening)
+	fastening.set_visual_scale_percent($Otis.placement.mechanical_settings.values[MechanicalInteractionSettings.VISUAL_SCALE_KEY])
 	bolt_tool = FasteningTool.new()
 	bolt_tool.name = "UniBoltTool"
 	bolt_tool.system = fastening
@@ -491,6 +493,53 @@ func build_fastening_station(crate: InteractableObject, dark: Material, amber: M
 		Vector3(4.35, -0.30, 0.40), dark, true)
 	label_at(test_ram, "", Vector3(-0.53, 0.5, 0.38), 17)
 	test_ram.readout = test_ram.get_child(test_ram.get_child_count() - 1) as Label3D
+	build_ram_pillar(dark, amber)
+
+func build_ram_pillar(dark: Material, amber: Material) -> void:
+	var pillar := InteractableObject.new()
+	pillar.name = "HydraulicControlPillar"
+	pillar.position = Vector3(-5.34, 0, 0.72)
+	pillar.definition = part_definition(&"RD-RAM-CONTROLS", "Hydraulic control pillar", 45.0)
+	pillar.definition.mobility = ObjectDefinition.Mobility.FIXED
+	pillar.definition.description = "Structural test actuator controls. [E] to operate."
+	pillar.definition.available_actions.assign([&"inspect", &"use_terminal"])
+	pillar.set_meta(&"no_fasteners", true)
+	add_child(pillar)
+	box(pillar, "FloorFoot", Vector3(0.60, 0.09, 0.49), Vector3(0, 0.045, 0), dark)
+	box(pillar, "Pedestal", Vector3(0.31, 1.04, 0.28), Vector3(0, 0.54, 0), dark)
+	add_shape(pillar, Vector3(0.34, 1.07, 0.30), Vector3(0, 0.535, 0))
+	box(pillar, "SafetyStripe", Vector3(0.32, 0.08, 0.292), Vector3(0, 0.81, 0), amber)
+	var head := Node3D.new()
+	head.position = Vector3(0, 1.12, 0.04)
+	head.rotation.x = -0.30
+	pillar.add_child(head)
+	box(head, "Console", Vector3(0.76, 0.51, 0.17), Vector3.ZERO, dark)
+	box(head, "SafetyLip", Vector3(0.76, 0.034, 0.18), Vector3(0, -0.239, 0), amber)
+	add_shape(pillar, Vector3(0.76, 0.51, 0.17), head.position)
+	pillar.get_child(pillar.get_child_count() - 1).rotation = head.rotation
+	var display := SubViewport.new()
+	display.disable_3d = true
+	display.size = Vector2i(760, 500)
+	display.render_target_update_mode = SubViewport.UPDATE_WHEN_VISIBLE
+	pillar.add_child(display)
+	var screen := MeshInstance3D.new()
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.68, 0.445)
+	screen.mesh = quad
+	var glass := StandardMaterial3D.new()
+	glass.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glass.albedo_texture = display.get_texture()
+	screen.material_override = glass
+	screen.position.z = 0.09
+	head.add_child(screen)
+	var anchor := Marker3D.new()
+	anchor.position.z = 0.94
+	head.add_child(anchor)
+	ram_session = TerminalInteraction.new()
+	ram_session.name = "RamInteraction"
+	add_child(ram_session)
+	ram_session.configure_ram($Otis, pillar, test_ram, screen, anchor, display)
+	ram_session.active_changed.connect($InteractionUI.set_terminal_active)
 
 func ram_rod(parent: Node3D, title: String, radius: float, surface: Material) -> MeshInstance3D:
 	var instance := MeshInstance3D.new()

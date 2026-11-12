@@ -4,6 +4,7 @@ extends Node
 signal active_changed(active: bool)
 var active := false
 var screen_ui: TerminalDisplay
+var ram_panel: RamControlPanel
 var camera: Camera3D
 var _otis: OtisController
 var _target: InteractableObject
@@ -19,6 +20,20 @@ var _pressed_buttons: Dictionary = {}
 
 func configure(otis: OtisController, target: InteractableObject, session: AdministrativeSession,
 		surface: MeshInstance3D, view_anchor: Marker3D, display: SubViewport) -> void:
+	configure_camera(otis, target, surface, view_anchor, display)
+	screen_ui = TerminalDisplay.new()
+	_display.add_child(screen_ui)
+	screen_ui.configure(session, _otis, target.definition.object_id)
+
+func configure_ram(otis: OtisController, target: InteractableObject, ram: StructuralTestRam,
+		surface: MeshInstance3D, view_anchor: Marker3D, display: SubViewport) -> void:
+	configure_camera(otis, target, surface, view_anchor, display)
+	ram_panel = RamControlPanel.new()
+	ram_panel.ram = ram
+	_display.add_child(ram_panel)
+
+func configure_camera(otis: OtisController, target: InteractableObject,
+		surface: MeshInstance3D, view_anchor: Marker3D, display: SubViewport) -> void:
 	_otis = otis
 	_target = target
 	_surface = surface
@@ -30,9 +45,6 @@ func configure(otis: OtisController, target: InteractableObject, session: Admini
 	camera.fov = 44.0
 	camera.near = 0.05
 	add_child(camera)
-	screen_ui = TerminalDisplay.new()
-	_display.add_child(screen_ui)
-	screen_ui.configure(session, _otis, target.definition.object_id)
 
 func is_target(object: InteractableObject) -> bool:
 	return is_instance_valid(object) and object == _target
@@ -44,12 +56,15 @@ func enter() -> bool:
 			or not _target.query_actions().has(&"use_terminal")):
 		return false
 	active = true
-	_otis.placement.clear_gesture()
+	_otis.placement.set_input_suspended(true)
 	_otis.controls_enabled = false
 	camera.global_transform = _otis.camera.global_transform
 	camera.fov = _otis.camera.fov
 	camera.make_current()
-	screen_ui.set_active(true)
+	if screen_ui != null:
+		screen_ui.set_active(true)
+	else:
+		ram_panel.buttons["STOP"].grab_focus()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_transition = create_tween().set_parallel().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	_transition.tween_property(camera, "global_transform", _view_anchor.global_transform, 0.28)
@@ -67,7 +82,9 @@ func leave() -> void:
 		_display.notify_mouse_exited()
 	_pointer_inside = false
 	_pressed_buttons.clear()
-	screen_ui.set_active(false)
+	if screen_ui != null:
+		screen_ui.set_active(false)
+	_otis.placement.set_input_suspended(false)
 	_otis.camera.make_current()
 	_otis.controls_enabled = true
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -76,6 +93,8 @@ func leave() -> void:
 func route(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		leave()
+	elif ram_panel != null and ram_panel.ram.handle_shortcut(event):
+		ram_panel.refresh()
 	elif event is InputEventKey:
 		_display.push_input(event, true)
 	elif event is InputEventMouse:

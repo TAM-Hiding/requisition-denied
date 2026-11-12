@@ -40,6 +40,9 @@ func run() -> void:
 	await concurrent_work()
 	await compound_and_strength()
 	await repeated_construction()
+	await held_same_tick()
+	await terminal_preferences()
+	await hydraulic_pillar()
 	await pose_and_gusset()
 	await invalidated_edge()
 	await rig()
@@ -273,6 +276,10 @@ func rig() -> void:
 	await frames(70)
 	check(ram.stalled and ram.actual_load > 0 and ram.actual_load <= ram.force_limit() and crate.fastened,
 		"Low force stalls against the anchored crate and respects its limit")
+	var ram_panel: RamControlPanel = facility.ram_session.ram_panel
+	ram_panel.refresh()
+	check(ram_panel.readout.text.contains("STALLED") and ram_panel.readout.text.contains("APPLIED LOAD %06d" % roundi(ram.actual_load)),
+		"Pillar reports the physical stall and measured load")
 	check(ram.rod_sleeve.scale.y + ram.rod_core.scale.y > closed_rod_length + 1.0
 		and is_equal_approx(ram.rod_core.position.x + ram.rod_core.scale.y * 0.5, ram.face.position.x - 0.0525)
 		and is_equal_approx(ram.face.position.x, ram.travel), "Visible rod ends at the swept collision plate at stall")
@@ -518,3 +525,204 @@ func invalidated_edge() -> void:
 	primary.queue_free()
 	support.queue_free()
 	await frames()
+
+func held_same_tick() -> void:
+	var panel := piece("ImmediateWorkpiece", Vector3(3, 1.4, 4.38), Vector3(0.30, 0.30, 0.04))
+	var backing := wall("ImmediateBacking", Vector3(3.3, 1.4, 4.46), Vector3(1.40, 0.80, 0.10))
+	actor.global_position = Vector3(3, 0.03, 2.65)
+	await frames(3)
+	actor.camera.look_at(panel.global_position)
+	check(actor.equipped_tool() == tool and actor.placement.begin_world(panel), "Held repro acquires the panel while equipped")
+	if not actor.placement.is_grabbing():
+		return
+	panel.global_transform = Transform3D(Basis(Vector3.BACK, 0.19), panel.global_position + Vector3.RIGHT * 0.48)
+	var intended := panel.global_transform
+	actor.camera.look_at(panel.global_position)
+	actor.set_tool_aiming(true)
+	var candidate := tool.aim_feedback(actor.camera, actor)
+	check(candidate.get("a") == panel and candidate.get("b") == backing and candidate.issue.is_empty(),
+		"Ray sees the new held pose before the next Jolt tick")
+	var result := tool.use(actor.camera, actor)
+	var connection := system.between(panel, backing)
+	check(result.begins_with("INSTALLED") and connection != null and panel.global_transform.is_equal_approx(intended)
+		and not actor.placement.is_active(), "Same-tick shot preserves held pose and releases the temporary grab")
+	if connection != null:
+		system.remove(connection.bolts[0])
+	actor.placement.cancel()
+	actor.set_tool_aiming(false)
+	panel.queue_free()
+	backing.queue_free()
+	await frames()
+
+func terminal_preferences() -> void:
+	var workstation := facility.get_node("Terminal") as TerminalWorkstation
+	var station := facility.terminal_session as TerminalInteraction
+	var ui := facility.get_node("InteractionUI")
+	var settings := actor.placement.mechanical_settings
+	var saved := settings.values.duplicate(true)
+	var key := MechanicalInteractionSettings.VISUAL_SCALE_KEY
+	var backing := wall("ScaleBacking", Vector3(2.9, 2.5, 4.55), Vector3(0.80, 0.60, 0.10))
+	var primary := piece("ScalePlate", Vector3(2.9, 2.5, 4.47), Vector3(0.65, 0.43, 0.04))
+	await frames()
+	var bolt := install(Vector3(2.80, 2.5, 3.8), Vector3.BACK, 1)
+	if bolt.state != InstalledFastener.State.INSTALLED:
+		return
+	check(is_equal_approx(bolt.visual.scale.x, 1.0), "Default bolt scale is 100 percent")
+	var hit_origin := bolt.head() - Vector3.BACK * 0.9 + Vector3.RIGHT * 0.020
+	check(system.target_bolt(hit_origin, Vector3.BACK, 2.0) == null, "Default selection misses an offset ray")
+	actor.global_position = Vector3(0, 0.02, -4.10)
+	await frames(2)
+	actor.camera.look_at(workstation.global_position)
+	check(station.enter() and actor.equipped_tool() == tool and actor.placement.input_suspended,
+		"Administrative CRT opens while the Uni-Bolt is equipped")
+	var screen := station.screen_ui
+	screen.show_section("Settings")
+	var panel := screen.settings_panel
+	check(panel.visible and panel.tabs.get_child_count() == 4, "CRT Settings exposes all four pages")
+	panel.show_settings(1)
+	check(panel.pages[1].visible and panel.fields.has("snap_distance_m") and panel.fields.has("snap_duration_seconds"),
+		"Mechanical fields remain accessible")
+	(panel.fields["snap_distance_m"][1] as SpinBox).value = 0.17
+	check(is_equal_approx(settings.values.installation.snap_distance_m, 0.17), "CRT mechanics values update the shared live settings")
+	panel.show_settings(0)
+	(panel.fields["precision_rotation_sensitivity"][1] as SpinBox).value = 0.012
+	(panel.toggles["invert_horizontal"][1] as CheckBox).set_pressed(true)
+	check(actor.placement.invert_horizontal_rotation and is_equal_approx(actor.placement.rotation_sensitivity, 0.012),
+		"Controls immediately update precision manipulation")
+	panel.show_settings(2)
+	var scale_field := panel.fields[key][1] as SpinBox
+	var local_a := bolt.local_a
+	var local_b := bolt.local_b
+	var orientation := bolt.local_orientation
+	var rating := bolt.grade.strength
+	scale_field.value = 75
+	check(is_equal_approx(bolt.visual.scale.x, 0.75), "75 percent updates the existing Grade 8 head")
+	scale_field.value = 150
+	check(is_equal_approx(bolt.visual.scale.x, 1.50) and system.target_bolt(hit_origin, Vector3.BACK, 2.0) == bolt,
+		"150 percent enlarges the existing selection target")
+	scale_field.value = 250
+	var fresh := install(Vector3(3.04, 2.5, 3.8), Vector3.BACK, 2)
+	check(is_instance_valid(fresh.visual) and is_equal_approx(fresh.visual.scale.x, 2.50), "New MegaBolt inherits 250 percent scale")
+	check(bolt.local_a == local_a and bolt.local_b == local_b and bolt.local_orientation == orientation
+		and bolt.grade.strength == rating and system.between(primary, backing) != null, "Scaling preserves ratings and connection transforms")
+	panel.show_settings(3)
+	panel.export_snapshot()
+	var exported := panel.import_path.text
+	check(not exported.is_empty() and FileAccess.file_exists(exported), "Development exports shared JSON")
+	var path := "user://rd008_settings_%d.json" % Time.get_ticks_usec()
+	check(settings.save_file(path).is_empty(), "Shared settings persist to disk")
+	var reopened := MechanicalInteractionSettings.new()
+	check(reopened.load_file(path).is_empty() and reopened.values[key] == 250, "Fresh settings instance loads persisted scale")
+	var legacy := settings.values.duplicate(true)
+	legacy.erase(key)
+	legacy.erase("controls")
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(JSON.stringify(legacy))
+	file.close()
+	panel.import_snapshot(path)
+	check(settings.values[key] == 100 and is_equal_approx(bolt.visual.scale.x, 1.0)
+		and is_equal_approx(settings.values.installation.snap_distance_m, 0.17), "Legacy snapshots restore tuning and default scale")
+	panel.import_snapshot(exported)
+	check(settings.values[key] == 250 and is_equal_approx(bolt.visual.scale.x, 2.5), "New JSON import restores live scale")
+	var invalid := settings.values.duplicate(true)
+	invalid[key] = 255
+	check(not settings.apply(invalid).is_empty() and settings.values[key] == 250, "Out-of-range scale is rejected atomically")
+	file = FileAccess.open(path, FileAccess.WRITE)
+	file.store_string("{ malformed")
+	file.close()
+	panel.import_snapshot(path)
+	check(panel.message.text.contains("Invalid JSON") and settings.values[key] == 250, "Invalid JSON preserves live preferences")
+	var before := tool.rounds.duplicate()
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	click.position = Vector2(-30, -30)
+	ui._input(click)
+	ui._input(action(&"drop_tool"))
+	ui._input(action(&"drop_item"))
+	ui._input(action(&"rig_drive"))
+	check(tool.rounds == before and actor.equipped_tool() == tool and not actor.placement.is_active()
+		and facility.test_ram.drive == StructuralTestRam.Drive.IDLE, "Administrative screen input never leaks to gameplay")
+	station.leave()
+	system.apply_structural_load(primary, bolt.head(), Vector3.RIGHT * 700.0)
+	check(bolt.state == InstalledFastener.State.FAILED, "Grade 8 still fails at its mechanical rating")
+	settings.apply(saved)
+	check(is_equal_approx(bolt.visual.scale.x, 1.0) and is_equal_approx(bolt.visual.scale.z, 0.35),
+		"Broken remnants also update immediately and stay shortened")
+	if fresh.state == InstalledFastener.State.INSTALLED:
+		system.remove(fresh)
+	DirAccess.remove_absolute(path)
+	if not exported.is_empty():
+		DirAccess.remove_absolute(exported)
+	primary.queue_free()
+	backing.queue_free()
+	await frames()
+
+func hydraulic_pillar() -> void:
+	var pillar := facility.get_node("HydraulicControlPillar") as InteractableObject
+	var station := facility.ram_session as TerminalInteraction
+	var ram := facility.test_ram as StructuralTestRam
+	var ui := facility.get_node("InteractionUI")
+	actor.global_position = Vector3(-5.34, 0.02, 1.90)
+	await frames(3)
+	actor.camera.look_at(pillar.global_position + Vector3.UP * 1.13)
+	ui.target = pillar
+	if DisplayServer.get_name() == "headless":
+		station.enter()
+	else:
+		ui._input(action(&"interact"))
+		ui._input(action(&"interact", false))
+	check(station.active and not actor.controls_enabled and actor.equipped_tool() == tool,
+		"E operates the physical pillar with the gun equipped")
+	var controls := station.ram_panel
+	var initial := ram.force_index
+	if DisplayServer.get_name() == "headless":
+		(controls.buttons["FORCE +"] as Button).pressed.emit()
+	else:
+		await create_timer(0.34).timeout
+		click_station_button(station, controls.buttons["FORCE +"])
+	check(ram.force_index == initial + 1, "Pillar FORCE + adjusts live controller")
+	(controls.buttons["FORCE −"] as Button).pressed.emit()
+	check(ram.force_index == initial, "Pillar FORCE − adjusts the same controller")
+	controls.force_slider.value = controls.force_slider.max_value
+	controls.refresh()
+	check(ram.force_limit() == 24000 and controls.readout.text.contains("024000"), "Pillar presets reach maximum in one action")
+	ui._input(action(&"rig_force_up"))
+	check(ram.force_limit() == 24000, "F6 cannot exceed the force limit through the pillar")
+	controls.force_slider.value = 0
+	controls.refresh()
+	check(ram.force_limit() == 60 and controls.readout.text.contains("000060"), "Pillar slider reaches minimum")
+	(controls.buttons["EXTEND"] as Button).pressed.emit()
+	await frames(8)
+	var extended := ram.travel
+	check(extended > 0.02 and ram.drive == StructuralTestRam.Drive.EXTEND, "Pillar EXTEND moves the physical ram")
+	(controls.buttons["STOP"] as Button).pressed.emit()
+	await frames(4)
+	check(ram.drive == StructuralTestRam.Drive.IDLE and is_equal_approx(extended, ram.travel)
+		and ram.actual_load == 0, "Pillar STOP holds the current stroke")
+	(controls.buttons["RETRACT"] as Button).pressed.emit()
+	await frames(3)
+	check(ram.travel < extended, "Pillar RETRACT backs off")
+	var failed_count := system.failed.size()
+	(controls.buttons["RESET"] as Button).pressed.emit()
+	await frames(16)
+	check(is_zero_approx(ram.travel) and system.failed.size() == failed_count, "Pillar RESET homes without repairing")
+	var before := tool.rounds.size()
+	ui._input(action(&"tool_primary"))
+	check(tool.rounds.size() == before and actor.equipped_tool() == tool, "Pillar owns input while operating")
+	station.leave()
+	ram.set_force_index(initial)
+
+
+func click_station_button(station: TerminalInteraction, button: Button) -> void:
+	var center := button.get_global_rect().get_center()
+	var uv := center / Vector2(station._display.size) - Vector2(0.5, 0.5)
+	var size := (station._surface.mesh as QuadMesh).size
+	var position := station.camera.unproject_position(station._surface.to_global(Vector3(uv.x * size.x, -uv.y * size.y, 0)))
+	var ui := facility.get_node("InteractionUI")
+	for down in [true, false]:
+		var click := InputEventMouseButton.new()
+		click.button_index = MOUSE_BUTTON_LEFT
+		click.position = position
+		click.pressed = down
+		ui._input(click)
