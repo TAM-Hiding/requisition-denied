@@ -9,17 +9,17 @@ const MIN_RESPONSE := 0.30
 @export var initial_distance := 1.35
 @export var wheel_step := 0.15
 @export var follow_speed := 20.0
-@export var rotation_speed := 0.009
-const AXES := [Vector3.RIGHT, Vector3.UP, Vector3.BACK]
-const AXIS_NAMES := ["X", "Y", "Z"]
+@export_range(0.001, 0.03, 0.001) var rotation_sensitivity := 0.009
+const TRACKBALL_RADIUS_LIMIT := 2.0
+const MAX_ROTATION_STEP := 0.035
 
 var distance := 1.35
-var axis := 0
 var rotating := false
 var valid := false
 var _pressed_at := -1
 var _hold_consumed := false
-var _angle := 0.0
+var _trackball_cursor := Vector2.ZERO
+var _pending_rotation := Quaternion.IDENTITY
 var _grab_candidate: InteractableObject
 var _grab: InteractableObject
 var _supported := false
@@ -100,9 +100,7 @@ func begin() -> bool:
 		return false
 	_clearance = clearance
 	distance = clampf(initial_distance, minimum_distance, maximum_distance)
-	axis = 0
-	rotating = false
-	_angle = 0
+	set_rotating(false)
 	valid = false
 	return true
 
@@ -144,9 +142,7 @@ func begin_world(item: InteractableObject) -> bool:
 	_supported = supported
 	distance = clampf((item.global_position - actor.camera.global_position).dot(-actor.camera.global_basis.z),
 		minimum_distance, maximum_distance)
-	axis = 0
-	rotating = false
-	_angle = 0.0
+	set_rotating(false)
 	valid = true
 	return true
 
@@ -169,8 +165,7 @@ func _release_grab() -> void:
 
 func cancel() -> void:
 	clear_gesture()
-	rotating = false
-	_angle = 0.0
+	set_rotating(false)
 	valid = false
 	if is_grabbing():
 		_release_grab()
@@ -178,21 +173,36 @@ func cancel() -> void:
 		actor.equipment.cancel_placement()
 	_clearance = null
 
-func cycle_axis() -> void:
-	axis = (axis + 1) % AXES.size()
-	_angle = 0
+func set_rotating(enabled: bool) -> void:
+	rotating = enabled and is_active() and not is_supported_grab()
+	_trackball_cursor = Vector2.ZERO
+	_pending_rotation = Quaternion.IDENTITY
 
 func adjust_distance(steps: float) -> void:
 	distance = clampf(distance + steps * wheel_step, minimum_distance, maximum_distance)
 
-func rotate_from_mouse(horizontal: float) -> void:
-	if is_supported_grab():
+func rotate_from_mouse(relative: Vector2) -> void:
+	if not rotating or not is_active() or is_supported_grab():
 		return
 	var item := _grab if is_grabbing() else actor.equipment.held_item()
-	if item == null:
+	if not is_instance_valid(item):
 		return
 	var response := response_factor(item.mass, lift_capacity())
-	_angle = clampf(_angle + horizontal * rotation_speed * response, -PI, PI)
+	var previous := _trackball_cursor
+	var travel := Vector2(relative.x, -relative.y) * rotation_sensitivity * response
+	_trackball_cursor = (previous + travel).limit_length(TRACKBALL_RADIUS_LIMIT)
+	var view_basis := actor.camera.global_basis.orthonormalized()
+	var turn := Quaternion(view_basis * _project_trackball(previous),
+		view_basis * _project_trackball(_trackball_cursor))
+	_pending_rotation = (turn * _pending_rotation).normalized()
+	if _pending_rotation.w < 0.0:
+		_pending_rotation = -_pending_rotation
+
+static func _project_trackball(cursor: Vector2) -> Vector3:
+	# A hyperbolic continuation keeps the spherical arc smooth beyond its center.
+	var radius_squared := cursor.length_squared()
+	var depth := sqrt(1.0 - radius_squared) if radius_squared <= 0.5 else 0.5 / sqrt(radius_squared)
+	return Vector3(cursor.x, cursor.y, depth).normalized()
 
 func _physics_process(delta: float) -> void:
 	if is_active():
@@ -217,20 +227,22 @@ func update_preview(delta: float) -> void:
 	# The displayed pose still has to clear Otis before it can be released.
 	var mask := 3 if is_grabbing() or _clearance.clear(pose) else 1
 	pose = _clearance.slide(pose, displacement, mask)
-	if mask == 3 and not rotating and is_zero_approx(_angle):
+	if mask == 3 and not rotating:
 		pose = _clearance.accommodate_contact(pose, displacement)
 	for increment in 8:
-		if is_zero_approx(_angle):
+		var remaining := _pending_rotation.get_angle()
+		if remaining < 0.0001:
 			break
-		var step := clampf(_angle, -0.035 * response, 0.035 * response)
-		_angle -= step
+		var step := minf(remaining, MAX_ROTATION_STEP * response)
+		var turn := Quaternion.IDENTITY.slerp(_pending_rotation, step / remaining)
 		var candidate := pose
-		var orientation := pose.basis.orthonormalized() * Basis(AXES[axis], step)
+		var orientation := Basis(turn) * pose.basis.orthonormalized()
 		candidate.basis = orientation.orthonormalized() * Basis.from_scale(pose.basis.get_scale())
 		if not _clearance.rotation_clear(pose, candidate, step):
-			_angle = 0
+			_pending_rotation = Quaternion.IDENTITY
 			break
 		pose = candidate
+		_pending_rotation = (turn.inverse() * _pending_rotation).normalized()
 	item.global_transform = pose
 	valid = _clearance.clear(pose)
 
@@ -251,7 +263,7 @@ func confirm() -> bool:
 		actor.equipment.result(false, "Placement blocked.")
 		return false
 	actor.equipment.finish_placement(item.global_transform)
-	rotating = false
+	set_rotating(false)
 	_clearance = null
 	valid = false
 	return true

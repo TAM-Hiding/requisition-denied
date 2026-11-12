@@ -25,6 +25,8 @@ godot --path .
 | --- | --- |
 | WASD | Walk |
 | Mouse | Look |
+| Middle mouse + drag | Rotate the object during precision manipulation |
+| Mouse wheel | Adjust placement distance during precision manipulation |
 | E tap | Use the workstation or open an object context menu within 3 m. Choose Move to start precision manipulation. |
 | Left click | Select a menu action; recapture mouse when no menu is open |
 | Escape | Close the terminal or context menu and resume. Cancel placement or release a grabbed load. Otherwise, release the mouse. |
@@ -60,7 +62,7 @@ lift, walking speed, acceleration, and chassis mass.
 
 Look at the storage crate with empty hands, hold **G** for 0.2 seconds, then
 release the key. **E → Move** enters the same mode. Scroll to adjust range, hold
-**R** to rotate, and use **Shift** to cycle axes. Tap **G** to place or press
+**middle mouse** and drag to rotate. Tap **G** to place or press
 **Escape** to release the world object. The same hold activates persistent
 placement for equipped items, which return to equipment on Escape. Overweight
 objects drag horizontally under gravity. The plate measures suspended weight

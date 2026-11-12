@@ -90,11 +90,7 @@ func run() -> void:
 	check(placement.distance > initial_range, "Grab shares wheel range adjustment")
 	aim(actor, crate.position + Vector3.UP * 0.55)
 	await frames(30)
-	placement.rotating = true
-	placement.cycle_axis()
-	placement.rotate_from_mouse(55)
-	await frames(30)
-	placement.rotating = false
+	await check_freeform(actor, crate)
 	check(crate.position.y > origin_y + 0.25 and not crate.basis.is_equal_approx(initial_basis)
 		and placement.valid, "Grab follows camera lift and shares manual rotation")
 	actor.camera.look_at(actor.camera.global_position + Vector3(0, 1, -0.1))
@@ -123,7 +119,8 @@ func run() -> void:
 		"Overweight grab keeps dynamics and transfers no mass to Otis")
 	var heavy_origin := crate.position
 	aim(actor, heavy_origin + Vector3.RIGHT * 0.55 + Vector3.UP * 0.55)
-	placement.rotate_from_mouse(100)
+	placement.set_rotating(true)
+	check(not placement.rotating, "Overweight drag cannot claim rotation input")
 	await frames(45)
 	check(crate.position.x > heavy_origin.x + 0.15 and crate.position.y < 0.67,
 		"Overweight grab slides under gravity without a lifting or rotation command")
@@ -236,11 +233,32 @@ func run() -> void:
 		event.pressed = false
 		ui._input(event)
 		check(placement.is_grabbing() and crate.freeze, "Gameplay activation key-up keeps manipulation active")
+		aim(actor, crate.global_position + Vector3.UP * 0.5)
+		await frames(25)
+		var middle := InputEventMouseButton.new()
+		middle.button_index = MOUSE_BUTTON_MIDDLE
+		middle.pressed = true
+		ui._input(middle)
+		var camera_basis := actor.camera.global_basis
+		var motion := InputEventMouseMotion.new()
+		motion.relative = Vector2(40, 25)
+		actor._unhandled_input(motion)
+		await frames(12)
+		var turned := crate.global_basis
+		var anchor_before_walk := placement.target_position()
+		Input.action_press("move_forward")
+		await frames(20)
+		Input.action_release("move_forward")
+		check(placement.rotating and actor.camera.global_basis == camera_basis
+			and placement.target_position().distance_to(anchor_before_walk) > 0.25
+			and crate.global_position.distance_to(placement.target_position()) < 0.50
+			and crate.global_basis.is_equal_approx(turned), "World crate follows WASD during middle-mouse rotation")
 		event.pressed = true
 		ui._input(event)
 		event.pressed = false
 		ui._input(event)
-		check(not placement.is_grabbing() and not crate.freeze, "Gameplay G tap restores physics")
+		check(not placement.is_grabbing() and not crate.freeze and not placement.rotating,
+			"Gameplay G tap restores physics and input while middle is held")
 
 	facility.queue_free()
 	await process_frame
@@ -261,6 +279,61 @@ func place_gesture(placement: PrecisionPlacement) -> void:
 	placement.press_drop(2000000)
 	placement.release_drop(2100000)
 
+func check_freeform(actor: OtisController, item: InteractableObject) -> void:
+	var placement := actor.placement
+	var anchor := placement.target_position()
+	var camera_basis := actor.camera.global_basis
+	var pose := item.global_transform
+	var original := item.global_basis.get_rotation_quaternion()
+	var turns: Array[float] = []
+	for drag in [Vector2(55, 0), Vector2(0, 55), Vector2(45, 45)]:
+		placement.set_rotating(true)
+		placement.rotate_from_mouse(drag)
+		await frames(12)
+		var turn := item.global_basis.get_rotation_quaternion() * original.inverse()
+		var local_axis := camera_basis.inverse() * turn.get_axis()
+		check(turn.get_angle() > 0.08, "Arcball responds to drag " + str(drag))
+		if drag.x != 0 and drag.y != 0:
+			check(absf(local_axis.x) > 0.3 and absf(local_axis.y) > 0.3, "Diagonal drag combines pitch and yaw")
+		elif drag.x == 0:
+			check(absf(local_axis.x) > 0.95, "Vertical drag rotates about camera right")
+		else:
+			check(absf(local_axis.y) > 0.95, "Horizontal drag rotates about camera up")
+			turns.append(turn.get_angle())
+		placement.set_rotating(false)
+		item.global_transform = pose
+	var mass := item.mass
+	item.mass = 10.0
+	placement.set_rotating(true)
+	placement.rotate_from_mouse(Vector2(55, 0))
+	await frames(12)
+	check(original.angle_to(item.global_basis.get_rotation_quaternion()) > turns[0] + 0.10,
+		"Same drag turns a lighter load farther")
+	item.mass = mass
+	placement.set_rotating(false)
+	placement.set_rotating(true)
+	placement.rotate_from_mouse(Vector2(80, 0))
+	await frames(12)
+	var before_roll := item.global_basis.get_rotation_quaternion()
+	placement.rotate_from_mouse(Vector2(0, 65))
+	await frames(12)
+	var roll := item.global_basis.get_rotation_quaternion() * before_roll.inverse()
+	check(absf((camera_basis.inverse() * roll.get_axis()).z) > 0.2, "Off-center arcball stroke includes view-axis roll")
+	for index in 16:
+		placement.set_rotating(false)
+		var saved := item.global_basis
+		placement.set_rotating(true)
+		check(item.global_basis == saved, "Starting a new gesture preserves orientation")
+		placement.rotate_from_mouse(Vector2(55, 30))
+		await frames(6)
+	placement.set_rotating(false)
+	var result := item.global_basis
+	await frames(4)
+	check(is_equal_approx(result.determinant(), 1.0) and result.is_equal_approx(item.global_basis)
+		and result.is_equal_approx(result.orthonormalized()), "Repeated compound gestures preserve an orthonormal basis")
+	check(item.global_position.distance_to(anchor) < 0.01 and actor.camera.global_basis == camera_basis,
+		"Rotation alone leaves the placement anchor and camera stationary")
+
 func check_obstacle(actor: OtisController, crate: InteractableObject, start: Vector3,
 		direction: Vector3, boundary: float, label: String) -> void:
 	actor.global_position = start
@@ -269,12 +342,19 @@ func check_obstacle(actor: OtisController, crate: InteractableObject, start: Vec
 	grab(actor, crate)
 	check(actor.placement.is_grabbing(), "Grab near " + label)
 	aim(actor, start + direction * 3.5 + Vector3.UP * 1.25)
-	actor.placement.rotating = true
+	actor.placement.set_rotating(true)
 	await frames(70)
-	actor.placement.rotating = false
+	actor.placement.set_rotating(false)
 	var blocked := crate.position.dot(direction) + 0.65
 	check(blocked <= boundary + 0.006 and blocked >= boundary - 0.10 and actor.placement.valid,
 		"Shared sweep stops at %s (face %.3f)" % [label, blocked])
+	var contact_basis := crate.global_basis
+	actor.placement.set_rotating(true)
+	actor.placement.rotate_from_mouse(Vector2(115, 0))
+	await frames(24)
+	check(actor.placement.valid and contact_basis.get_rotation_quaternion().angle_to(
+		crate.global_basis.get_rotation_quaternion()) < 0.2, "Rotation cannot penetrate " + label)
+	actor.placement.set_rotating(false)
 	aim(actor, start + direction * 1.6 + Vector3.UP * 1.1)
 	await frames(35)
 	check(crate.position.dot(direction) + 0.65 < blocked - 0.12, "Retreat clears " + label)

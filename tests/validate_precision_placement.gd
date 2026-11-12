@@ -61,16 +61,15 @@ func run() -> void:
 	check(placement.is_active(), "Holding again does not confirm")
 	await frames(35)
 	check(placement.valid and wrench.global_position.distance_to(placement.target_position()) < 0.005, "Preview follows camera target")
-	check(placement.axis == 0, "Initial axis is X")
-	for expected in [1, 2, 0]:
-		placement.cycle_axis()
-		check(placement.axis == expected, "Cycle visits axis %d" % expected)
 	var before := wrench.global_transform
-	placement.rotate_from_mouse(25)
+	placement.set_rotating(true)
+	placement.rotate_from_mouse(Vector2(25, 0))
 	await frames(5)
 	var response := PrecisionPlacement.response_factor(wrench.mass, placement.lift_capacity())
-	var expected_basis := before.basis * Basis(Vector3.RIGHT, 25 * placement.rotation_speed * response)
-	check(wrench.global_basis.is_equal_approx(expected_basis), "Rotation uses the object's local X")
+	var expected_turn := asin(25 * placement.rotation_sensitivity * response)
+	var expected_basis := Basis(actor.camera.global_basis.y, expected_turn) * before.basis
+	check(wrench.global_basis.is_equal_approx(expected_basis), "Horizontal drag turns about camera up")
+	placement.set_rotating(false)
 	check(wrench.global_position.distance_to(before.origin) < 0.005, "Rotation preserves pivot")
 	actor.camera.rotate_y(0.2)
 	await frames(35)
@@ -125,15 +124,18 @@ func run() -> void:
 	wrench.global_transform = Transform3D(Basis.IDENTITY, placement.target_position())
 	await frames(8)
 	check(placement.valid, "Narrow side of wrench fits near wall")
-	placement.cycle_axis()
-	placement.rotate_from_mouse(175)
+	placement.set_rotating(true)
+	placement.rotate_from_mouse(Vector2(175, 0))
 	await frames(15)
 	check(placement.valid and wrench.global_position.x < 6.0
 		and absf(wrench.global_basis.z.x) < 0.99, "Wall stops unsafe rotation while the displayed pose stays clear")
 	var stopped_basis := wrench.global_basis
-	placement.rotate_from_mouse(-15)
+	placement.set_rotating(false)
+	placement.set_rotating(true)
+	placement.rotate_from_mouse(Vector2(-15, 0))
 	await frames(7)
 	check(not wrench.global_basis.is_equal_approx(stopped_basis) and placement.valid, "Reverse rotation can leave wall contact")
+	placement.set_rotating(false)
 	var crate := facility.get_node("Crate") as InteractableObject
 	actor.global_position = crate.global_position + Vector3(0, -0.64, 1.8)
 	await frames(3)
@@ -182,10 +184,8 @@ func run() -> void:
 	aim(actor, elevated + Vector3.LEFT * 0.12)
 	await frames(28)
 	check(weight.global_basis.is_equal_approx(tilt), "Free translation preserves the tilted orientation")
-	placement.rotating = true
-	placement.cycle_axis()
-	placement.cycle_axis()
-	placement.rotate_from_mouse(-4)
+	placement.set_rotating(true)
+	placement.rotate_from_mouse(Vector2(0, -4))
 	await frames(4)
 	var manual_basis := weight.global_basis
 	check(not manual_basis.is_equal_approx(tilt), "Manual rotation still controls the held block")
@@ -193,13 +193,13 @@ func run() -> void:
 	await frames(40)
 	var contact := weight.global_position
 	check(placement.valid and contact.y > crate.global_position.y + 0.65, "Tilted corner meets crate without penetration")
-	check(weight.global_basis.is_equal_approx(manual_basis), "Holding R suppresses contact response")
-	# Release R and continue applying pressure without changing the aim.
+	check(weight.global_basis.is_equal_approx(manual_basis), "Holding middle mouse suppresses contact response")
+	# Release middle mouse and continue applying pressure without changing the aim.
 	var before_contact := weight.global_basis
-	placement.rotating = false
+	placement.set_rotating(false)
 	await frames(6)
 	var early_turn := before_contact.get_rotation_quaternion().angle_to(weight.global_basis.get_rotation_quaternion())
-	check(early_turn > 0.003 and early_turn < 0.16, "Releasing R resumes progressive contact rotation")
+	check(early_turn > 0.003 and early_turn < 0.16, "Releasing middle mouse resumes progressive contact rotation")
 	var all_clear := true
 	for step in 150:
 		await physics_frame
@@ -264,6 +264,13 @@ func validate_graphical_input(actor: OtisController, ui: CanvasLayer) -> void:
 	actor.camera.look_at(actor.camera.global_position + Vector3.FORWARD)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	ui.set_physics_process(true)
+	var middle := InputEventMouseButton.new()
+	middle.button_index = MOUSE_BUTTON_MIDDLE
+	middle.pressed = true
+	ui._input(middle)
+	check(not actor.placement.rotating, "Middle mouse outside placement is not claimed")
+	middle.pressed = false
+	ui._input(middle)
 	ui._input(key(KEY_G, true))
 	await create_timer(0.42).timeout
 	ui._input(key(KEY_G, false))
@@ -271,18 +278,14 @@ func validate_graphical_input(actor: OtisController, ui: CanvasLayer) -> void:
 	var camera_basis := actor.camera.global_basis
 	var item := actor.equipment.held_item()
 	var item_basis := item.global_basis
-	ui._input(key(KEY_R, true))
+	middle.pressed = true
+	ui._input(middle)
+	check(actor.placement.rotating, "Middle mouse activates rotation during placement")
 	var motion := InputEventMouseMotion.new()
 	motion.relative = Vector2(20, 0)
 	actor._unhandled_input(motion)
 	await frames(5)
-	check(actor.camera.global_basis.is_equal_approx(camera_basis) and not item.global_basis.is_equal_approx(item_basis), "R routes mouse motion to object")
-	ui._input(key(KEY_R, false))
-	actor._unhandled_input(motion)
-	check(not actor.camera.global_basis.is_equal_approx(camera_basis), "R release restores camera motion")
-	ui._input(key(KEY_SHIFT, true))
-	ui._input(key(KEY_SHIFT, false))
-	check(actor.placement.axis == 1, "Shift key event selects Y")
+	check(actor.camera.global_basis.is_equal_approx(camera_basis) and not item.global_basis.is_equal_approx(item_basis), "Middle mouse routes mouse motion to object")
 	var prior_distance := actor.placement.distance
 	var wheel := InputEventMouseButton.new()
 	wheel.button_index = MOUSE_BUTTON_WHEEL_UP
@@ -293,10 +296,22 @@ func validate_graphical_input(actor: OtisController, ui: CanvasLayer) -> void:
 	Input.action_press("move_right")
 	await frames(16)
 	Input.action_release("move_right")
-	check(actor.global_position.distance_to(start) > 0.15 and actor.placement.is_active(), "WASD works during placement")
+	check(actor.global_position.distance_to(start) > 0.15 and actor.placement.rotating
+		and actor.camera.global_basis.is_equal_approx(camera_basis), "WASD works with camera rotation frozen")
+	check(item.global_position.distance_to(actor.placement.target_position()) < 0.18, "Preview follows the walking target")
+	var rotated_basis := item.global_basis
+	middle.pressed = false
+	ui._input(middle)
+	check(actor.camera.global_basis.is_equal_approx(camera_basis) and not actor.placement.rotating, "Middle release leaves camera where it was")
+	actor._unhandled_input(motion)
+	check(not actor.camera.global_basis.is_equal_approx(camera_basis)
+		and item.global_basis.is_equal_approx(rotated_basis), "Mouse-look resumes without changing object orientation")
 	if not OS.get_environment("RD_SCREENSHOT").is_empty():
 		await process_frame
 		await RenderingServer.frame_post_draw
 		root.get_texture().get_image().save_png(OS.get_environment("RD_SCREENSHOT"))
+	middle.pressed = true
+	ui._input(middle)
 	ui._input(key(KEY_ESCAPE, true))
+	check(not actor.placement.rotating, "Cancel while middle mouse is held restores input ownership")
 	check(not actor.placement.is_active() and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and actor.equipment.held_item() == item, "Escape cancels and retains capture and item")

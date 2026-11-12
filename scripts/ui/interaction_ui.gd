@@ -98,7 +98,7 @@ func _physics_process(delta: float) -> void:
 	if placing:
 		help.text = "Wheel Range  •  G Place  •  Esc Cancel"
 		if not otis.placement.is_supported_grab():
-			help.text += "  •  Hold R Rotate  •  Shift Axis"
+			help.text += "  •  Hold Middle Mouse Rotate"
 	else:
 		help.text = "WASD Move  •  E Context  •  Hold E Stow  •  1 Equip  •  G Drop / hold to place or grab  •  Esc Cursor  •  F3 Debug"
 	status.visible = not placing or not otis.placement.valid
@@ -110,6 +110,8 @@ func _physics_process(delta: float) -> void:
 			otis.placement.cancel()
 		else:
 			otis.placement.clear_gesture()
+			if otis.placement.rotating:
+				otis.placement.set_rotating(false)
 	feedback_time = maxf(0, feedback_time - delta)
 	if feedback_time == 0:
 		status.text = ""
@@ -134,8 +136,8 @@ func _physics_process(delta: float) -> void:
 		prompt.text = "SUPPORTED GRAB"
 	elif placing:
 		var placement := otis.placement
-		prompt.text = "PLACEMENT  |  ROTATION %s  |  %s" % [
-			PrecisionPlacement.AXIS_NAMES[placement.axis], "CLEAR" if placement.valid else "BLOCKED"]
+		prompt.text = "%s  |  %s" % [
+			"ROTATING" if placement.rotating else "PLACEMENT", "CLEAR" if placement.valid else "BLOCKED"]
 	elif target != null:
 		prompt.text = "[E]  " + target.definition.display_name
 	else:
@@ -226,14 +228,14 @@ func _input(event: InputEvent) -> void:
 func handle_placement_controls(event: InputEvent) -> bool:
 	if event.is_action("interact") or event.is_action("equip_first"):
 		return true
-	if event is InputEventKey:
-		if event.physical_keycode == KEY_R:
-			otis.placement.rotating = event.pressed and not otis.placement.is_supported_grab()
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_MIDDLE:
+			if otis.placement.is_supported_grab():
+				return false
+			otis.placement.set_rotating(event.pressed)
 			return true
-		if event.physical_keycode == KEY_SHIFT and event.pressed:
-			otis.placement.cycle_axis()
-			return true
-	if event is InputEventMouseButton and event.pressed:
+		if not event.pressed:
+			return false
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			otis.placement.adjust_distance(1)
 			return true
@@ -326,7 +328,7 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
 		if is_instance_valid(otis) and is_instance_valid(otis.placement):
 			otis.placement.clear_gesture()
-			otis.placement.rotating = false
+			otis.placement.set_rotating(false)
 		cancel_hold()
 		if is_instance_valid(otis) and is_instance_valid(otis.placement) and otis.placement.is_grabbing():
 			otis.placement.cancel()

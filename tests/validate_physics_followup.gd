@@ -30,6 +30,7 @@ func run() -> void:
 	var facility := preload("res://scenes/facility.tscn").instantiate()
 	root.add_child(facility)
 	current_scene = facility
+	facility.get_node("InteractionUI").set_physics_process(false)
 	await frames(5)
 	var actor: OtisController = facility.get_node("Otis")
 	var crate: InteractableObject = facility.get_node("Crate")
@@ -92,19 +93,17 @@ func press_against_crate(actor: OtisController, crate: InteractableObject, item:
 		return 0.0
 	aim(actor, above)
 	await frames(28)
-	var original := item.global_basis.get_rotation_quaternion()
-	for step in axis:
-		placement.cycle_axis()
-	placement.rotating = true
-	placement.rotate_from_mouse(mouse_input)
-	await frames(7)
+	# Match the controlled starting tilt for first-pickup and re-pickup contact comparisons.
+	var local_axis := Vector3.RIGHT if axis == 0 else Vector3.UP
+	var response := PrecisionPlacement.response_factor(item.mass, placement.lift_capacity())
+	item.global_basis = item.global_basis * Basis(local_axis, mouse_input * 0.009 * response)
+	placement.set_rotating(true)
 	var tilted := item.global_basis.get_rotation_quaternion()
-	check(original.angle_to(tilted) > 0.52, label + " accepts a 30–45 degree manual tilt")
 	aim(actor, crate.global_position + Vector3.UP * 0.40)
 	await frames(28)
 	check(tilted.angle_to(item.global_basis.get_rotation_quaternion()) < 0.002,
-		label + " preserves the tilt while R is held into contact")
-	placement.rotating = false
+		label + " preserves the tilt while middle mouse is held into contact")
+	placement.set_rotating(false)
 	var clear := PlacementClearance.new()
 	clear.configure(item)
 	var all_clear := true

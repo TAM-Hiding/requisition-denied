@@ -30,7 +30,8 @@ func supporting_load_kg() -> float:
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if placement.is_active() and placement.rotating:
-			placement.rotate_from_mouse(event.relative.x)
+			placement.rotate_from_mouse(event.relative)
+			get_viewport().set_input_as_handled()
 			return
 		rotate_y(-event.relative.x * mouse_sensitivity)
 		camera.rotation.x = clampf(camera.rotation.x - event.relative.y * mouse_sensitivity, -1.5, 1.5)
