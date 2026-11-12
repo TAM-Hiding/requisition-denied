@@ -7,6 +7,8 @@ const STROKE := 4.35
 enum Drive { IDLE, EXTEND, RETRACT }
 var system: FasteningSystem
 var face: AnimatableBody3D
+var rod_sleeve: MeshInstance3D
+var rod_core: MeshInstance3D
 var readout: Label3D
 var drive := Drive.IDLE
 var force_index := 2
@@ -39,11 +41,25 @@ func _physics_process(delta: float) -> void:
 	stalled = false
 	if drive != Drive.IDLE:
 		step_drive(delta)
+	update_stroke_visuals()
 	if is_instance_valid(specimen):
 		displacement = specimen.global_position.distance_to(specimen_start)
 	if readout != null:
 		readout.text = "STRUCTURAL TEST RAM\n%.0f SET  /  %.0f APPLIED\n%.2f m  /  %s" % [
 			force_limit(), actual_load, travel, "STALL" if stalled else Drive.keys()[drive]]
+
+func update_stroke_visuals() -> void:
+	if rod_sleeve == null or rod_core == null:
+		return
+	var guide_exit := -0.15
+	var plate_back := face.position.x - 0.0525
+	var joint := lerpf(guide_exit, plate_back, 0.54)
+	fit_rod(rod_sleeve, guide_exit - 0.04, joint + 0.015)
+	fit_rod(rod_core, joint - 0.025, plate_back)
+
+func fit_rod(rod: MeshInstance3D, start: float, end: float) -> void:
+	rod.position.x = (start + end) * 0.5
+	rod.scale.y = end - start
 
 func step_drive(delta: float) -> void:
 	var axis := global_basis.x.normalized()

@@ -155,18 +155,21 @@ orange-faced structural test ram is west of the storage crate.
 | Left mouse | Install or remove an individual fastener with the tool equipped |
 | Right mouse (hold) | Aim down sights and pin a suspended workpiece at its current world pose |
 | R | Switch INSTALL / REMOVE |
-| 1 during a world grab | Retrieve the stowed tool, or equip a loose tool in reach while looking at it if storage is empty |
+| G (hold / tap) | Acquire a loose workpiece / place the grabbed workpiece while carrying the Uni-Bolt |
+| 1 | Stow the equipped Uni-Bolt or retrieve it from storage, including during a world grab |
+| X | Drop the equipped Uni-Bolt using the ordinary collision-safe drop check |
 | F5 | Extend or retract the ram |
 | F6 / Shift+F6 | Increase or decrease the ram force limit |
 | F7 | Reset and retract the ram |
 | F8 / F9 | Cycle test grades / refill the selected grade while equipped |
 
-To fasten while holding a part, equip and stow the tool, grab a plate or angle
-with **G**, position it, then press **1**. Equipping and ADS keep the part at
-the world pose it already occupied. You can also start a world grab with the
-tool equipped by aiming at a movable object and holding **G**. After ADS,
-the wheel resumes camera-relative positioning if you need to adjust the
-pinned part. Middle mouse can rotate it at the pin while ADS is off.
+To fasten while holding a part, equip the tool and hold **G** on a loose
+plate or angle. You can also stow the tool with **1**, start manipulating a
+workpiece, then press **1** to retrieve the tool and keep adjusting the part.
+With empty storage, look at a loose tool in reach and press **1** during a
+world grab to equip it. Holding **RMB** pins the workpiece and aligns the
+sights with the center ray. Releasing **RMB** smoothly resumes camera-relative
+positioning. Use the wheel and middle mouse to adjust the workpiece outside ADS.
 Aim through the part into its backing and click. The first successful bolt
 transfers control to the assembly immediately. Additional clicks at separate
 locations reinforce that body pair. Press **R** and aim at each bolt head to
@@ -197,7 +200,10 @@ test, put an angle against the narrow reaction web near the end of the ram
 stroke. Leave the free leg projecting into the ram's path. F3 shows body pair,
 depth, group, individual loads and strengths, and recent failures. The ram
 readout includes configured and estimated force, travel, displacement and
-the last failed group. Reset retracts the ram while preserving all damage.
+the last failed group. The piston sleeves follow the actual swept pushing
+plate, including at stalls. Reset retracts the ram while preserving damage.
+F3 labels applied load and rated strength separately. A zero applied load
+is the expected reading for a newly installed fastener.
 
 Freeform groups retain original bodies, local attachment transforms and
 individual bolt records. Each connected island uses one simulated compound

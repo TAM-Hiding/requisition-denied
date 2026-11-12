@@ -68,18 +68,21 @@ func query(shape: Shape3D, transform: Transform3D, motion: Vector3 = Vector3.ZER
 func pose_origin_camera() -> Vector3:
 	var base := actor.camera.to_local(anchor.global_position)
 	var normal := base + profile.lowered_offset * pose_blend
-	return normal.lerp(Vector3(0, -0.093, -0.45), aim_blend) if item is FasteningTool else normal
+	return Vector3(0.27, -0.25, -0.56).lerp(Vector3(0, -FasteningTool.SIGHT_HEIGHT, -0.48), aim_blend) 		if item is FasteningTool else normal
+
+func presentation_basis() -> Basis:
+	return actor.camera.global_basis if item is FasteningTool else anchor.global_basis
 
 func retraction_origin_camera(normal: Vector3, amount: float, depth: float = 1.0) -> Vector3:
 	var direction := -1.0 if normal.x >= 0 else 1.0
 	return normal + profile.retraction_offset * depth + Vector3(direction * amount, 0, 0)
 
 func volume_clear(space: PhysicsDirectSpaceState3D, origin: Vector3) -> bool:
-	var transform := Transform3D(anchor.global_basis, origin) * profile.envelope_transform
+	var transform := Transform3D(presentation_basis(), origin) * profile.envelope_transform
 	return space.intersect_shape(query(profile.envelope, transform), 1).is_empty()
 
 func travel_limit(space: PhysicsDirectSpaceState3D, retracted: Vector3, normal: Vector3, extra_margin: float = 0) -> float:
-	var start := Transform3D(anchor.global_basis, retracted) * profile.envelope_transform
+	var start := Transform3D(presentation_basis(), retracted) * profile.envelope_transform
 	var parameters := query(profile.envelope, start, normal - retracted)
 	parameters.margin += extra_margin
 	# An enlarged anticipation volume may overlap at the safe retracted end.
@@ -164,7 +167,7 @@ func update_pose(delta: float) -> void:
 		obstructed = true
 		_previous_valid = false
 		return
-	item.position = anchor.to_local(position)
+	item.global_transform = Transform3D(presentation_basis(), position)
 	item.show()
 	obstructed = extension < 0.999 or lateral_shift > 0.001
 	_previous_origin = position

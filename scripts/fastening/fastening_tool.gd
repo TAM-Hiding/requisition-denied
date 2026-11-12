@@ -3,6 +3,7 @@ extends InteractableObject
 
 const CAPACITY := 20
 const RANGE := 3.0
+const SIGHT_HEIGHT := 0.089
 const GRADES: Array[FastenerGrade] = [
 	preload("res://data/fasteners/standard.tres"),
 	preload("res://data/fasteners/grade_8.tres"),
@@ -29,8 +30,19 @@ func replenish() -> void:
 	while rounds.size() < CAPACITY:
 		rounds.append(system.create_round(GRADES[grade_index]))
 
+func aim_feedback(camera: Camera3D, actor: PhysicsBody3D) -> Dictionary:
+	var origin := camera.global_position
+	var direction := -camera.global_basis.z
+	if removing:
+		var bolt := system.target_bolt(origin, direction, RANGE, actor)
+		return {"issue": "NO INTACT FASTENER TARGETED"} if bolt == null else {
+			"a": bolt.a, "b": bolt.b, "issue": "", "bolt": bolt,
+		}
+	return system.probe(origin, direction, RANGE, actor)
+
 func use(camera: Camera3D, actor: PhysicsBody3D) -> String:
 	if removing:
+		system.reconcile()
 		var target := system.target_bolt(camera.global_position, -camera.global_basis.z, RANGE, actor)
 		if not system.remove(target):
 			return "NO INTACT FASTENER TARGETED"

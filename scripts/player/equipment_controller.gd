@@ -54,8 +54,6 @@ func attach(item: InteractableObject) -> void:
 	item.transform = Transform3D.IDENTITY
 	item.show()
 	presentation.track(item)
-	if item is FasteningTool:
-		actor.placement.pin_workpiece()
 
 func stow() -> Dictionary:
 	if placing:

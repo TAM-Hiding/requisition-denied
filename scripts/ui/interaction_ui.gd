@@ -129,10 +129,14 @@ func _physics_process(delta: float) -> void:
 	var ram: StructuralTestRam = get_parent().test_ram
 	var aim := {}
 	if tool != null and gameplay_input_allowed():
-		aim = tool.system.probe(otis.camera.global_position, -otis.camera.global_basis.z, FasteningTool.RANGE, otis)
+		aim = tool.aim_feedback(otis.camera, otis)
 		tool_readout.text = tool.hud_text() + "\nLMB Use  •  RMB Aim  •  R Mode  •  F8 Grade  •  F9 Refill"
-		if not tool.removing:
-			tool_readout.text += "\n" + ("INSTALL UNI-BOLT" if aim.issue.is_empty() else aim.issue)
+		var guidance: String = aim.issue
+		if guidance.is_empty():
+			guidance = "REMOVE BOLT #%d" % aim.bolt.id if tool.removing else "INSTALL UNI-BOLT"
+		if not tool.removing and tool.rounds.is_empty():
+			guidance = "MAGAZINE EMPTY"
+		tool_readout.text += "\n" + guidance
 		if ram.drive != StructuralTestRam.Drive.IDLE:
 			tool_readout.text += "\n" + ram.hud_text()
 	elif ram.drive != StructuralTestRam.Drive.IDLE or debug_visible:
@@ -144,10 +148,12 @@ func _physics_process(delta: float) -> void:
 	var mount_issue := ""
 	if placing:
 		help.text = "Wheel Range  •  G Place  •  Esc Cancel"
-		if tool == null and otis.placement.is_grabbing():
-			help.text += "  •  1 Equip Tool"
+		if otis.placement.is_grabbing():
+			help.text += "  •  1 Stow  •  X Drop Tool" if tool != null else "  •  1 Equip Tool"
 		if not otis.placement.is_supported_grab():
 			help.text += "  •  Hold Middle Mouse Rotate"
+	elif tool != null:
+		help.text = "Hold G Grab  •  1 Stow  •  X Drop Tool  •  E Context  •  F3 Debug"
 	else:
 		help.text = "WASD Move  •  E Context  •  Hold E Stow  •  1 Equip  •  G Drop / hold to place or grab  •  Esc Cursor  •  F3 Debug  •  F4 Mechanics"
 	status.visible = tool != null or not placing or not otis.placement.valid or socket != null
@@ -311,29 +317,34 @@ func handle_placement_controls(event: InputEvent) -> bool:
 		if event.is_action_pressed("interact") and otis.placement.installation_candidate() != null:
 			otis.placement.install_grab()
 		return true
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_MIDDLE:
-			if otis.tool_aiming:
-				return true
-			if otis.placement.is_supported_grab():
-				return false
-			otis.placement.set_rotating(event.pressed)
+	if event.is_action("precision_rotate"):
+		if otis.tool_aiming:
 			return true
-		if not event.pressed:
+		if otis.placement.is_supported_grab():
 			return false
-		if otis.tool_aiming and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
-			return true
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+		otis.placement.set_rotating(event.is_action_pressed("precision_rotate"))
+		return true
+	if event.is_action_pressed("precision_range_in"):
+		if not otis.tool_aiming:
 			otis.placement.adjust_distance(1)
-			return true
-		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		return true
+	if event.is_action_pressed("precision_range_out"):
+		if not otis.tool_aiming:
 			otis.placement.adjust_distance(-1)
-			return true
+		return true
 	return false
 
 func handle_fastening_input(event: InputEvent) -> bool:
 	var tool := otis.equipped_tool()
-	if otis.placement.is_grabbing() and event.is_action_pressed("equip_first") and tool == null:
+	if event.is_action_pressed("equip_first") and tool != null:
+		otis.set_tool_aiming(false)
+		otis.equipment.stow()
+		return true
+	if event.is_action_pressed("drop_tool") and tool != null:
+		otis.set_tool_aiming(false)
+		otis.equipment.drop()
+		return true
+	if otis.placement.is_grabbing() and event.is_action_pressed("equip_first"):
 		var targeted := otis.target_hit().get("collider") as FasteningTool
 		if otis.equipment.held_item() == null and targeted != null and otis.equipment.stored_items().is_empty():
 			otis.equipment.pick_up(targeted)
@@ -362,6 +373,7 @@ func handle_fastening_input(event: InputEvent) -> bool:
 		otis.set_tool_aiming(true)
 	elif event.is_action_pressed("tool_mode_toggle"):
 		tool.removing = not tool.removing
+		show_feedback("UNI-BOLT · REMOVE" if tool.removing else "UNI-BOLT · INSTALL")
 		var color := Color("e4b968") if tool.removing else Color("83d6a8")
 		tool.indicator.albedo_color = color
 		tool.indicator.emission = color

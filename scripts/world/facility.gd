@@ -397,7 +397,18 @@ func build_fastening_station(crate: InteractableObject, dark: Material, amber: M
 	box(bolt_tool, "Status", Vector3(0.020, 0.010, 0.034), Vector3(0, 0.102, 0.085), bolt_tool.indicator)
 	box(bolt_tool, "FrontSight", Vector3(0.010, 0.014, 0.012), Vector3(0, 0.082, -0.165), amber)
 	add_shape(bolt_tool, Vector3(0.155, 0.22, 0.39), Vector3(0, 0, -0.015))
-	bolt_tool.get_child(bolt_tool.get_child_count() - 1).name = "CollisionShape3D"
+	var tool_shape := bolt_tool.get_child(bolt_tool.get_child_count() - 1) as CollisionShape3D
+	tool_shape.name = "CollisionShape3D"
+	var tool_profile := HeldItemProfile.new()
+	tool_profile.envelope = tool_shape.shape
+	tool_profile.envelope_transform = tool_shape.transform
+	tool_profile.retraction_offset = Vector3(0, 0, 0.32)
+	tool_profile.lateral_clearance_limit = 0.0
+	tool_profile.anticipation_margin = 0.025
+	bolt_tool.definition.held_profile = tool_profile
+	for side in [-1, 1]:
+		box(bolt_tool, "RearSight", Vector3(0.009, 0.019, 0.018),
+			Vector3(side * 0.017, FasteningTool.SIGHT_HEIGHT - 0.005, 0.115), dark)
 	bolt_tool.replenish()
 
 	var plate := stock_piece(&"RD-STOCK-PLATE", "Steel plate", 4.0,
@@ -413,26 +424,31 @@ func build_fastening_station(crate: InteractableObject, dark: Material, amber: M
 		add_shape(angle, Vector3(width, 0.23, 0.033), Vector3(0, 0.116, -0.109))
 	stock_piece(&"RD-STOCK-BAR", "Steel bar", 5.0, Vector3(-4.9, 0.032, 3.28),
 		Vector3(0.48, 0.055, 0.11), steel).name = "SteelBar"
-	var gusset := stock_piece(&"RD-STOCK-GUSSET", "Triangular gusset", 2.0, Vector3(-4.18, 0.026, 3.35),
-		Vector3(0.27, 0.041, 0.27), steel)
+	var gusset := InteractableObject.new()
 	gusset.name = "TriangularGusset"
-	gusset.get_node("Model").free()
+	gusset.definition = part_definition(&"RD-STOCK-GUSSET", "Triangular gusset", 2.0)
+	gusset.position = Vector3(-4.10, 0.026, 3.60)
 	var hull := ConvexPolygonShape3D.new()
 	hull.points = PackedVector3Array([
 		Vector3(-0.13, -0.02, -0.13), Vector3(0.13, -0.02, -0.13), Vector3(-0.13, -0.02, 0.13),
 		Vector3(-0.13, 0.02, -0.13), Vector3(0.13, 0.02, -0.13), Vector3(-0.13, 0.02, 0.13)])
-	gusset.get_node("CollisionShape3D").shape = hull
+	var gusset_shape := CollisionShape3D.new()
+	gusset_shape.name = "CollisionShape3D"
+	gusset_shape.shape = hull
+	gusset.add_child(gusset_shape)
 	var triangle := MeshInstance3D.new()
-	# The same hull generates a filled procedural mesh for presentation.
+	triangle.name = "Model"
+	# Godot uses clockwise winding. The opaque prism and convex collider
+	# share the same six vertices in every interaction state.
 	var geometry := SurfaceTool.new()
 	geometry.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var points := hull.points
-	for vertex in [0, 1, 2, 3, 5, 4, 0, 3, 4, 0, 4, 1, 1, 4, 5, 1, 5, 2, 2, 5, 3, 2, 3, 0]:
-		geometry.add_vertex(points[vertex])
+	for vertex in [0, 2, 1, 3, 4, 5, 0, 4, 3, 0, 1, 4, 1, 5, 4, 1, 2, 5, 2, 3, 5, 2, 0, 3]:
+		geometry.add_vertex(hull.points[vertex])
 	geometry.generate_normals()
 	triangle.mesh = geometry.commit()
 	triangle.material_override = steel
 	gusset.add_child(triangle)
+	add_child(gusset)
 
 	# Recess the lower sides to expose fastening skids within the crate's
 	# existing footprint. The main body still blocks overlength drill paths.
@@ -467,12 +483,29 @@ func build_fastening_station(crate: InteractableObject, dark: Material, amber: M
 	test_ram.add_child(face)
 	add_shape(face, Vector3(0.105, 0.42, 0.57), Vector3.ZERO)
 	box(face, "Pusher", Vector3(0.105, 0.42, 0.57), Vector3.ZERO, amber)
-	box(face, "Piston", Vector3(0.37, 0.12, 0.12), Vector3(-0.24, 0, 0), steel)
 	test_ram.face = face
+	test_ram.rod_sleeve = ram_rod(test_ram, "PistonSleeve", 0.088, steel)
+	test_ram.rod_core = ram_rod(test_ram, "PistonCore", 0.058, material(Color("afc2ca")))
+	test_ram.update_stroke_visuals()
 	box(test_ram, "ReactionWeb", Vector3(0.40, 0.84, 0.15),
 		Vector3(4.35, -0.30, 0.40), dark, true)
 	label_at(test_ram, "", Vector3(-0.53, 0.5, 0.38), 17)
 	test_ram.readout = test_ram.get_child(test_ram.get_child_count() - 1) as Label3D
+
+func ram_rod(parent: Node3D, title: String, radius: float, surface: Material) -> MeshInstance3D:
+	var instance := MeshInstance3D.new()
+	instance.name = title
+	var cylinder_mesh := CylinderMesh.new()
+	cylinder_mesh.top_radius = radius
+	cylinder_mesh.bottom_radius = radius
+	cylinder_mesh.height = 1.0
+	cylinder_mesh.radial_segments = 12
+	cylinder_mesh.rings = 0
+	instance.mesh = cylinder_mesh
+	instance.material_override = surface
+	instance.rotation.z = PI * 0.5
+	parent.add_child(instance)
+	return instance
 
 func stock_piece(id: StringName, title: String, kilograms: float, at: Vector3,
 		size: Vector3, surface: Material) -> InteractableObject:

@@ -1,9 +1,10 @@
 class_name InstalledFastener
 extends RefCounted
 
-enum State { RECOVERED, INSTALLED, FAILED }
+enum State { RECOVERED, INSTALLED, FAILED, INVALIDATED }
 var id: int
 var grade: FastenerGrade
+var group_id := 0
 var a: PhysicsBody3D
 var b: PhysicsBody3D
 var local_a: Vector3
@@ -14,7 +15,7 @@ var load_estimate := 0.0
 var visual: Node3D
 
 func recoverable() -> bool:
-	return state != State.FAILED
+	return state in [State.RECOVERED, State.INSTALLED]
 
 func head() -> Vector3:
 	return a.to_global(local_a)

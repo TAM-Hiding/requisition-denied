@@ -10,6 +10,8 @@ var failed: Array[InstalledFastener] = []
 var last_failed_group := 0
 var last_load := 0.0
 var _next_bolt := 1
+var _issued := {}
+var _installed := {}
 var _next_group := 1
 var _roots := {}
 var _followers := {}
@@ -22,30 +24,45 @@ func create_round(grade: FastenerGrade) -> InstalledFastener:
 	bolt.id = _next_bolt
 	bolt.grade = grade
 	_next_bolt += 1
+	_issued[bolt.id] = weakref(bolt)
 	return bolt
 
 func compatible(body: PhysicsBody3D, actor: PhysicsBody3D = null) -> bool:
+	if not usable_body(body):
+		return false
 	if body is InteractableObject:
-		return (body.state == InteractableObject.State.WORLD
-			or (actor is OtisController and body.state == InteractableObject.State.CARRIED and body.support_carrier == actor)) 			and not body is FasteningTool \
+		var controlled: bool = actor is OtisController and body.state == InteractableObject.State.CARRIED \
+			and body.support_carrier == actor
+		return (body.state == InteractableObject.State.WORLD or controlled) and not body is FasteningTool \
 			and (not body is MechanicalComponent or not is_instance_valid(body.seating_mount))
 	return body is StaticBody3D and not body.has_meta(&"no_fasteners")
+
+func usable_body(body: Variant) -> bool:
+	return is_instance_valid(body) and body.is_inside_tree() and not body.is_queued_for_deletion()
+
+func valid_round(bolt: InstalledFastener) -> bool:
+	return bolt != null and _issued.has(bolt.id) and _issued[bolt.id].get_ref() == bolt \
+		and bolt.grade != null and is_finite(bolt.grade.strength) and bolt.grade.strength > 0.0
 
 func anchored(body: PhysicsBody3D) -> bool:
 	return body is StaticBody3D or (body is InteractableObject and body.mobility() == ObjectDefinition.Mobility.FIXED)
 
-func cast(from: Vector3, to: Vector3, exclusions: Array[RID] = [], inside := false) -> Dictionary:
-	var params := PhysicsRayQueryParameters3D.create(from, to, 1 | PROBE_LAYER, exclusions)
+func cast(from: Vector3, to: Vector3, exclusions: Array[RID] = [], inside := false,
+		mask := 1 | PROBE_LAYER) -> Dictionary:
+	var params := PhysicsRayQueryParameters3D.create(from, to, mask, exclusions)
 	params.hit_from_inside = inside
 	return get_world_3d().direct_space_state.intersect_ray(params)
 
 func probe(origin: Vector3, direction: Vector3, reach: float, actor: PhysicsBody3D = null) -> Dictionary:
 	if not origin.is_finite() or not direction.is_finite() or direction.is_zero_approx() or not is_finite(reach) or reach <= 0.0:
 		return {"issue": "NO TARGET SURFACE"}
+	sync_probes()
 	var exclude: Array[RID] = []
 	if actor != null:
 		exclude.append(actor.get_rid())
 	for root in _roots.values():
+		if not usable_body(root):
+			continue
 		var rid: RID = root.get_rid()
 		if not exclude.has(rid):
 			exclude.append(rid)
@@ -92,9 +109,14 @@ func probe(origin: Vector3, direction: Vector3, reach: float, actor: PhysicsBody
 		result.issue = "NO SECONDARY MATERIAL IN CONTACT"
 		return result
 	result.backing = backing.position
+	for body in [a, b]:
+		if body is InteractableObject and body.state == InteractableObject.State.CARRIED:
+			if not actor is OtisController or not actor.placement.can_handoff_workpiece(body):
+				result.issue = "WORKPIECE NEEDS CLEARANCE"
+				return result
 	if connections.any(func(group: FastenerConnection) -> bool:
 		return group.bolts.any(func(bolt: InstalledFastener) -> bool:
-			return bolt.head().distance_to(entry) < 0.025)):
+			return record_matches(group, bolt) and usable_body(bolt.a) and bolt.head().distance_to(entry) < 0.025)):
 		result.issue = "FASTENER OBSTRUCTED"
 		return result
 	result.issue = ""
@@ -112,18 +134,37 @@ static func logical_body(body: PhysicsBody3D, shape_index := -1) -> PhysicsBody3
 	return body
 
 func install(bolt: InstalledFastener, origin: Vector3, direction: Vector3, reach: float, actor: PhysicsBody3D = null) -> String:
-	if (bolt == null or bolt.state != InstalledFastener.State.RECOVERED or bolt.grade == null
-			or not is_finite(bolt.grade.strength) or bolt.grade.strength <= 0.0):
+	reconcile()
+	if not valid_round(bolt) or bolt.state != InstalledFastener.State.RECOVERED or bolt.group_id != 0:
 		return "INVALID FASTENER"
 	var target := probe(origin, direction, reach, actor)
 	if not target.issue.is_empty():
 		return target.issue
 	var a: PhysicsBody3D = target.a
 	var b: PhysicsBody3D = target.b
+	var workpiece: InteractableObject
 	for body in [a, b]:
+		if active_shapes(body).is_empty():
+			return "INVALID SURFACE"
 		if body is InteractableObject and body.state == InteractableObject.State.CARRIED:
-			if not actor is OtisController or not actor.placement.handoff_workpiece(body):
+			if (workpiece != null or not actor is OtisController
+					or not actor.placement.can_handoff_workpiece(body)):
 				return "WORKPIECE NEEDS CLEARANCE"
+			workpiece = body
+	var local_a := a.to_local(target.point)
+	var local_b := b.to_local(target.backing)
+	var normal: Vector3 = target.normal
+	var up := Vector3.RIGHT if absf(normal.dot(Vector3.UP)) > 0.95 else Vector3.UP
+	var orientation := a.global_basis.inverse() * Basis.looking_at(-normal, up)
+	if not local_a.is_finite() or not local_b.is_finite() or not orientation.is_finite():
+		return "INVALID SURFACE"
+
+	# Stage the visual before ownership changes. A rejected handoff has no
+	# effect on the magazine, the original grab or the connection graph.
+	var visual := make_bolt_visual(bolt)
+	if workpiece != null and not actor.placement.handoff_workpiece(workpiece):
+		visual.free()
+		return "WORKPIECE NEEDS CLEARANCE"
 	var group := between(a, b)
 	var new_connection := group == null
 	if new_connection:
@@ -132,21 +173,80 @@ func install(bolt: InstalledFastener, origin: Vector3, direction: Vector3, reach
 		group.b = b
 		group.id = _next_group
 		_next_group += 1
-		connections.append(group)
 	bolt.a = a
 	bolt.b = b
-	bolt.local_a = a.to_local(target.point)
-	bolt.local_b = b.to_local(target.backing)
-	var normal: Vector3 = target.normal
-	var up := Vector3.RIGHT if absf(normal.dot(Vector3.UP)) > 0.95 else Vector3.UP
-	bolt.local_orientation = a.global_basis.inverse() * Basis.looking_at(-normal, up)
+	bolt.local_a = local_a
+	bolt.local_b = local_b
+	bolt.local_orientation = orientation
+	bolt.group_id = group.id
 	bolt.state = InstalledFastener.State.INSTALLED
 	bolt.load_estimate = 0.0
+	attach_visual(bolt, visual)
+	_installed[bolt.id] = bolt
 	group.bolts.append(bolt)
-	make_bolt_visual(bolt)
 	if new_connection:
+		connections.append(group)
 		rebuild()
 	return ""
+
+func attach_visual(bolt: InstalledFastener, visual: Node3D) -> void:
+	bolt.a.add_child(visual)
+	visual.transform = Transform3D(bolt.local_orientation, bolt.local_a)
+	bolt.visual = visual
+
+func record_matches(group: FastenerConnection, bolt: InstalledFastener) -> bool:
+	return valid_round(bolt) and _installed.get(bolt.id) == bolt \
+		and bolt.state == InstalledFastener.State.INSTALLED and bolt.group_id == group.id \
+		and ((bolt.a == group.a and bolt.b == group.b) or (bolt.a == group.b and bolt.b == group.a)) \
+		and bolt.local_a.is_finite() and bolt.local_b.is_finite() and bolt.local_orientation.is_finite()
+
+func reconcile() -> void:
+	var topology_changed := false
+	var members := {}
+	for group: FastenerConnection in connections.duplicate():
+		var endpoints_valid := usable_body(group.a) and usable_body(group.b) and group.a != group.b
+		var retained: Array[InstalledFastener] = []
+		for bolt in group.bolts:
+			if not endpoints_valid or not record_matches(group, bolt) or members.has(bolt.id):
+				continue
+			members[bolt.id] = true
+			retained.append(bolt)
+			if not is_instance_valid(bolt.visual) or bolt.visual.is_queued_for_deletion() or bolt.visual.get_parent() != bolt.a:
+				discard_visual(bolt)
+				attach_visual(bolt, make_bolt_visual(bolt))
+			bolt.visual.transform = Transform3D(bolt.local_orientation, bolt.local_a)
+			bolt.visual.show()
+		if retained.size() != group.bolts.size():
+			group.bolts.assign(retained)
+		if group.bolts.is_empty():
+			connections.erase(group)
+			topology_changed = true
+	for id in _installed.keys():
+		if members.has(id):
+			continue
+		var bolt: InstalledFastener = _installed[id]
+		discard_visual(bolt)
+		bolt.group_id = 0
+		bolt.a = null
+		bolt.b = null
+		bolt.state = InstalledFastener.State.INVALIDATED
+		_installed.erase(id)
+	if topology_changed:
+		rebuild()
+
+func _physics_process(_delta: float) -> void:
+	reconcile()
+
+func sync_probes() -> void:
+	# Rigid roots can move or be reparented earlier in the same tick. Push the
+	# current local-to-world transform before excluding the compound collider.
+	for proxy in _proxies:
+		if usable_body(proxy):
+			proxy.force_update_transform()
+			var rid := proxy.get_rid()
+			var current: Transform3D = PhysicsServer3D.body_get_state(rid, PhysicsServer3D.BODY_STATE_TRANSFORM)
+			if not current.is_equal_approx(proxy.global_transform):
+				PhysicsServer3D.body_set_state(rid, PhysicsServer3D.BODY_STATE_TRANSFORM, proxy.global_transform)
 
 func between(a: PhysicsBody3D, b: PhysicsBody3D) -> FastenerConnection:
 	for group in connections:
@@ -159,12 +259,18 @@ func target_bolt(origin: Vector3, direction: Vector3, reach: float, actor: Physi
 	if actor != null:
 		exclude.append(actor.get_rid())
 	var dir := direction.normalized()
-	var wall := cast(origin, origin + dir * reach, exclude)
+	var wall := cast(origin, origin + dir * reach, exclude, false, 1)
 	var limit: float = reach if wall.is_empty() else minf(reach, origin.distance_to(wall.position) + 0.004)
 	var nearest: InstalledFastener
 	for group in connections:
 		for bolt in group.bolts:
+			if (not record_matches(group, bolt) or not usable_body(bolt.a) or not usable_body(bolt.b)
+					or not is_instance_valid(bolt.visual) or bolt.visual.is_queued_for_deletion()
+					or not bolt.visual.is_visible_in_tree()):
+				continue
 			var normal := (bolt.a.global_basis * bolt.local_orientation.z).normalized()
+			if normal.dot(dir) >= -0.1:
+				continue
 			var offset := bolt.head() + normal * 0.008 - origin
 			var depth := offset.dot(dir)
 			if depth > 0.0 and depth < limit and (offset - dir * depth).length() < 0.014:
@@ -173,6 +279,7 @@ func target_bolt(origin: Vector3, direction: Vector3, reach: float, actor: Physi
 	return nearest
 
 func remove(bolt: InstalledFastener) -> bool:
+	reconcile()
 	if bolt == null or bolt.state != InstalledFastener.State.INSTALLED:
 		return false
 	var group := between(bolt.a, bolt.b)
@@ -187,6 +294,7 @@ func remove(bolt: InstalledFastener) -> bool:
 
 func unlink(group: FastenerConnection, bolt: InstalledFastener, broken: bool) -> void:
 	group.bolts.erase(bolt)
+	_installed.erase(bolt.id)
 	bolt.state = InstalledFastener.State.FAILED if broken else InstalledFastener.State.RECOVERED
 	if broken:
 		failed.append(bolt)
@@ -195,11 +303,17 @@ func unlink(group: FastenerConnection, bolt: InstalledFastener, broken: bool) ->
 		if is_instance_valid(bolt.visual):
 			bolt.visual.scale.z = 0.35
 	else:
-		bolt.visual.hide()
-		bolt.visual.queue_free()
-		bolt.visual = null
+		discard_visual(bolt)
+		bolt.group_id = 0
+		bolt.load_estimate = 0.0
 	if group.bolts.is_empty():
 		connections.erase(group)
+
+func discard_visual(bolt: InstalledFastener) -> void:
+	if is_instance_valid(bolt.visual):
+		bolt.visual.hide()
+		bolt.visual.queue_free()
+	bolt.visual = null
 
 func physics_root(body: PhysicsBody3D) -> PhysicsBody3D:
 	return _roots.get(body, body)
@@ -228,6 +342,7 @@ func route(body: PhysicsBody3D) -> Array[FastenerConnection]:
 func apply_structural_load(body: PhysicsBody3D, point: Vector3, force: Vector3) -> void:
 	if not is_instance_valid(body) or not point.is_finite() or not force.is_finite():
 		return
+	reconcile()
 	last_load = force.length()
 	var changed := false
 	var processed: Array[FastenerConnection] = []
@@ -263,11 +378,9 @@ func installed_count() -> int:
 		count += group.bolts.size()
 	return count
 
-func make_bolt_visual(bolt: InstalledFastener) -> void:
+func make_bolt_visual(bolt: InstalledFastener) -> Node3D:
 	var visual := Node3D.new()
-	bolt.a.add_child(visual)
-	visual.transform = Transform3D(bolt.local_orientation, bolt.local_a)
-	bolt.visual = visual
+	visual.name = "Bolt_%d" % bolt.id
 	make_cylinder(visual, 0.010, 0.005, 0.0035, 6, bolt.grade.finish)
 	make_cylinder(visual, 0.008, 0.002, 0.007, 6, bolt.grade.finish, 0.010)
 	var ring := MeshInstance3D.new()
@@ -283,6 +396,7 @@ func make_bolt_visual(bolt: InstalledFastener) -> void:
 	visual.add_child(ring)
 	make_cylinder(visual, 0.00635, REACH - 0.006, -0.073, 8, bolt.grade.finish)
 	make_cylinder(visual, 0.004, 0.006, -0.149, 8, bolt.grade.finish, 0.0)
+	return visual
 
 func make_cylinder(parent: Node3D, radius: float, length: float, z: float, sides: int,
 		material: Material, bottom := -1.0) -> void:
@@ -308,18 +422,21 @@ func rebuild() -> void:
 				old.angular_velocity]
 	for collider in _copies:
 		if is_instance_valid(collider):
-			collider.get_parent().remove_child(collider)
+			if collider.get_parent() != null:
+				collider.get_parent().remove_child(collider)
 			collider.queue_free()
 	for proxy in _proxies:
 		if is_instance_valid(proxy):
-			proxy.get_parent().remove_child(proxy)
+			if proxy.get_parent() != null:
+				proxy.get_parent().remove_child(proxy)
 			proxy.queue_free()
 	for body in _followers:
 		if not is_instance_valid(body):
 			continue
 		var saved: Dictionary = _followers[body]
 		var parent: Node = saved.parent if is_instance_valid(saved.parent) else get_parent()
-		body.reparent(parent)
+		if body.get_parent() != parent:
+			body.reparent(parent)
 		body.collision_layer = saved.layer
 		body.collision_mask = saved.mask
 		body.freeze = saved.frozen
@@ -415,11 +532,12 @@ func diagnostics(aim: Dictionary) -> String:
 	var strengths := PackedStringArray()
 	if group != null:
 		for bolt in group.bolts:
-			strengths.append("#%d %.0f/%.0f" % [bolt.id, bolt.load_estimate, bolt.grade.strength])
+			if record_matches(group, bolt):
+				strengths.append("#%d LOAD %.0f / RATING %.0f" % [bolt.id, bolt.load_estimate, bolt.grade.strength])
 	var broken := PackedStringArray()
 	for bolt in failed.slice(maxi(0, failed.size() - 6)):
 		broken.append(str(bolt.id))
 	return "\nFASTENER SURFACE %s → %s · DEPTH %.3f m\nCONNECTION %s · ACTIVE %d · LAST LOAD %.0f\nBOLTS %s · FAILED %s" % [
 		a.name if is_instance_valid(a) else "—", b.name if is_instance_valid(b) else "—", aim.get("depth", 0.0),
 		"#%d FIXED" % group.id if group != null else "—", installed_count(), last_load,
-		", ".join(strengths), ", ".join(broken)]
+		", ".join(strengths) if not strengths.is_empty() else "NONE", ", ".join(broken) if not broken.is_empty() else "NONE"]

@@ -39,6 +39,9 @@ func run() -> void:
 	check(tool.rounds.size() == 20 and tool.rounds[0].grade.strength == 100.0, "Standard magazine starts full")
 	await concurrent_work()
 	await compound_and_strength()
+	await repeated_construction()
+	await pose_and_gusset()
+	await invalidated_edge()
 	await rig()
 	facility.queue_free()
 	await process_frame
@@ -260,6 +263,7 @@ func rig() -> void:
 	var bolt := install(approach, Vector3(-3.105, 0.05, -0.5) - approach, 2)
 	await frames(4)
 	check(crate.fastened and system.physics_root(crate) == facility.get_node("Floor"), "Thin crate skid supports direct floor attachment")
+	var closed_rod_length := ram.rod_sleeve.scale.y + ram.rod_core.scale.y
 	ram.travel = 1.70
 	ram.face.position.x = ram.travel
 	ram.change_force(-10)
@@ -269,6 +273,9 @@ func rig() -> void:
 	await frames(70)
 	check(ram.stalled and ram.actual_load > 0 and ram.actual_load <= ram.force_limit() and crate.fastened,
 		"Low force stalls against the anchored crate and respects its limit")
+	check(ram.rod_sleeve.scale.y + ram.rod_core.scale.y > closed_rod_length + 1.0
+		and is_equal_approx(ram.rod_core.position.x + ram.rod_core.scale.y * 0.5, ram.face.position.x - 0.0525)
+		and is_equal_approx(ram.face.position.x, ram.travel), "Visible rod ends at the swept collision plate at stall")
 	ram.change_force(20)
 	check(ram.force_limit() > 9999.0, "Rig setting can exceed MegaBolt strength")
 	await frames(35)
@@ -279,6 +286,8 @@ func rig() -> void:
 	await frames(380)
 	check(ram.travel <= 0.001 and ram.drive == StructuralTestRam.Drive.IDLE and ram.actual_load == 0.0,
 		"Reset retracts and clears active force")
+	check(is_equal_approx(ram.rod_sleeve.scale.y + ram.rod_core.scale.y, closed_rod_length),
+		"Visible sleeves retract to their initial length")
 	check(system.failed.size() == count and bolt.state == InstalledFastener.State.FAILED,
 		"Rig reset leaves structural failures intact")
 	crate.global_transform = Transform3D(Basis.IDENTITY, Vector3(-2.5, 0.65, -0.5))
@@ -296,3 +305,216 @@ func rig() -> void:
 	await frames(20)
 	check(ram.travel < retract_from - 0.08 and ram.actual_load == 0.0,
 		"Drive reversal retracts without applying a test force")
+
+func action(name: StringName, pressed := true) -> InputEventAction:
+	var event := InputEventAction.new()
+	event.action = name
+	event.pressed = pressed
+	return event
+
+func repeated_construction() -> void:
+	var ui := facility.get_node("InteractionUI")
+	var placement := actor.placement
+	var backing := piece("CycleBacking", Vector3(3.3, 1.4, 4.65), Vector3(0.70, 0.70, 0.20), 8.0)
+	var panel := piece("CyclePlate", Vector3(3.3, 1.4, 4.52), Vector3(0.42, 0.36, 0.04))
+	actor.global_position = Vector3(3.3, 0.02, 2.80)
+	tool.load_grade(0)
+	actor.camera.look_at(actor.camera.global_position + Vector3.UP, Vector3.FORWARD)
+	await frames(2)
+	placement.press_drop(1000000)
+	placement.release_drop(1300000)
+	check(actor.equipped_tool() == tool and not placement.is_active(), "Holding G without a workpiece never places the gun")
+	check(InputMap.action_get_events("drop_tool")[0].physical_keycode == KEY_X, "Dedicated tool drop uses named X binding")
+	actor.camera.look_at(panel.global_position)
+	placement.press_drop(1000000)
+	placement.release_drop(1300000)
+	ui._input(action(&"ui_cancel"))
+	check(not placement.is_grabbing() and not panel.freeze and not panel.fastened and actor.equipped_tool() == tool,
+		"Escape releases the temporary grab while keeping equipment available")
+	var baseline_groups := system.connections.size()
+	var failed_count := system.failed.size()
+	var reserve_count := tool.recovered.size()
+	var magazine := tool.rounds.duplicate()
+	tool.rounds.clear()
+	check(tool.use(actor.camera, actor) == "MAGAZINE EMPTY" and system.connections.size() == baseline_groups,
+		"Empty magazine cannot commit structural state")
+	tool.rounds.assign(magazine)
+	var bad_grade := FastenerGrade.new()
+	var invalid_round := system.create_round(bad_grade)
+	check(system.install(invalid_round, actor.camera.global_position, Vector3.UP, 3.0, actor) == "INVALID FASTENER"
+		and invalid_round.state == InstalledFastener.State.RECOVERED and invalid_round.visual == null,
+		"Zero-rated fastener is rejected before any change")
+	var forged := InstalledFastener.new()
+	forged.id = tool.rounds[0].id
+	forged.grade = tool.rounds[0].grade
+	check(system.install(forged, actor.camera.global_position, Vector3.UP, 3.0, actor) == "INVALID FASTENER",
+		"Duplicate unissued identity is rejected")
+
+	for cycle in 16:
+		var reverse := cycle % 2 == 0
+		if tool.removing:
+			ui.handle_fastening_input(action(&"tool_mode_toggle"))
+		var at := Vector3(3.3 + 0.025 * (cycle % 3), 1.40, 4.52)
+		var initial := Transform3D(Basis(Vector3.BACK, -0.22 + 0.02 * cycle), at)
+		panel.global_transform = initial
+		backing.global_transform = Transform3D(Basis.IDENTITY, at + Vector3.BACK * 0.128)
+		for body in [panel, backing]:
+			body.linear_velocity = Vector3.ZERO
+			body.angular_velocity = Vector3.ZERO
+		await frames(2)
+		if reverse:
+			ui.handle_fastening_input(action(&"equip_first"))
+		actor.camera.look_at(panel.global_position)
+		placement.press_drop(1000000)
+		placement.release_drop(1300000)
+		check(placement.is_grabbing() and panel.state == InteractableObject.State.CARRIED,
+			"Hold G acquires rotated plate in interaction order %s, cycle %d" % [reverse, cycle])
+		if not placement.is_grabbing():
+			break
+		if reverse:
+			ui.handle_fastening_input(action(&"equip_first"))
+		check(actor.equipped_tool() == tool, "1 equips the tool during cycle %d" % cycle)
+		var original_pose := panel.global_transform
+		var original_range := placement.distance
+		placement.adjust_distance(1)
+		check(placement.distance > original_range and placement.target_position() != original_pose.origin,
+			"Workpiece remains adjustable immediately after equipping")
+		placement.distance = original_range
+		ui.handle_fastening_input(action(&"tool_secondary_aim"))
+		actor.camera.look_at(actor.camera.global_position + Vector3.UP, Vector3.FORWARD)
+		placement.update_preview(1.0 / 60.0)
+		check(panel.global_transform.is_equal_approx(original_pose), "ADS pins without moving the workpiece")
+		var before := tool.rounds.duplicate()
+		check(not tool.use(actor.camera, actor).begins_with("INSTALLED") and tool.rounds == before
+			and system.between(panel, backing) == null and placement.is_grabbing(),
+			"Failed install preserves magazine, visual state, graph and grab")
+		actor.set_tool_aiming(false)
+		check(placement.target_position().is_equal_approx(original_pose.origin),
+			"Releasing ADS resumes movement from the pinned world pose")
+		actor.camera.look_at(panel.to_global(Vector3(-0.10, 0, 0)))
+		ui.handle_fastening_input(action(&"tool_secondary_aim"))
+		if cycle == 0:
+			var obstruction := wall("WorkpieceClearanceBlocker", at + Vector3.RIGHT * 0.18, Vector3(0.08, 0.12, 0.08))
+			await frames(2)
+			check(tool.use(actor.camera, actor) == "WORKPIECE NEEDS CLEARANCE" and tool.rounds == before
+				and placement.is_grabbing() and system.between(panel, backing) == null,
+				"Clearance rejection preserves the original grab and rolls back the attempt")
+			obstruction.queue_free()
+			await frames(2)
+		var committed := tool.use(actor.camera, actor)
+		var group := system.between(panel, backing)
+		check(committed.begins_with("INSTALLED") and group != null and panel.fastened and not placement.is_active()
+			and panel.global_transform.is_equal_approx(original_pose), "Commit transfers the exact pose once: " + committed)
+		if group == null:
+			placement.cancel()
+			break
+		var first := group.bolts[0]
+		check(first.group_id == group.id and first.grade.strength == 100 and first.load_estimate == 0
+			and first.visual.is_visible_in_tree() and not tool.rounds.has(first), "Committed round has positive rating and visible membership")
+		if cycle == 0:
+			first.visual.queue_free()
+			system.reconcile()
+			check(first.visual.is_visible_in_tree() and first.visual.get_parent() == panel,
+				"Missing representation is rebuilt at the installed point")
+			var diagnostics := system.diagnostics({"a": panel, "b": backing})
+			check(diagnostics.contains("LOAD 0 / RATING 100") and diagnostics.contains("FAILED"),
+				"Diagnostics distinguish unloaded capacity from failure")
+		# Move the compound, then reinforce it before another physics frame.
+		backing.global_position.x += 0.16
+		backing.force_update_transform()
+		actor.camera.look_at(panel.to_global(Vector3(0.10, 0, 0)))
+		var reinforced := tool.use(actor.camera, actor)
+		check(reinforced.begins_with("INSTALLED") and group.bolts.size() == 2
+			and first.visual.global_position.is_equal_approx(first.head()), "Moved island uses current probe and visual transforms: " + reinforced)
+		actor.set_tool_aiming(false)
+		ui._input(action(&"ui_cancel"))
+		check(first.state == InstalledFastener.State.INSTALLED and panel.fastened, "Escape preserves completed attachment")
+		ui.handle_fastening_input(action(&"tool_mode_toggle"))
+		check(tool.removing and ui.status.text == "UNI-BOLT · REMOVE", "Mode switch replaces the prior action feedback")
+		await frames(2)
+		for bolt in group.bolts.duplicate():
+			actor.camera.look_at(bolt.head())
+			var preview := tool.aim_feedback(actor.camera, actor)
+			var removed := tool.use(actor.camera, actor)
+			check(preview.get("bolt") == bolt and removed.begins_with("RECOVERED")
+				and bolt.state == InstalledFastener.State.RECOVERED and bolt.group_id == 0 and bolt.visual == null,
+				"REMOVE targets and recovers the exact live record: " + removed)
+		check(not panel.fastened and not panel.freeze and system.between(panel, backing) == null
+			and tool.rounds.size() == 20, "Last removal clears all temporary and fixed state")
+		if DisplayServer.get_name() != "headless":
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	check(system.connections.size() == baseline_groups and system.failed.size() == failed_count
+		and tool.recovered.size() == reserve_count, "Repeated construction has no ghost connections, losses or failures")
+	tool.removing = false
+	actor.set_tool_aiming(false)
+	placement.cancel()
+	panel.queue_free()
+	backing.queue_free()
+	await frames()
+
+func pose_and_gusset() -> void:
+	var gusset := facility.get_node("TriangularGusset") as InteractableObject
+	var model := gusset.get_node("Model") as MeshInstance3D
+	var mesh := model.mesh
+	var hull := gusset.get_node("CollisionShape3D").shape as ConvexPolygonShape3D
+	var faces := mesh.get_faces()
+	var top_visible := false
+	for offset in range(0, faces.size(), 3):
+		if faces[offset].y > 0 and faces[offset + 1].y > 0 and faces[offset + 2].y > 0:
+			top_visible = (faces[offset + 2] - faces[offset]).cross(faces[offset + 1] - faces[offset]).y > 0
+	check(top_visible and hull.points.size() == 6 and faces.size() == 24
+		and model.material_override.transparency == BaseMaterial3D.TRANSPARENCY_DISABLED,
+		"Gusset is an opaque outward-wound prism with matching hull")
+	actor.global_position = Vector3(-3.65, 0.01, 4.7)
+	await frames(3)
+	actor.camera.look_at(gusset.global_position)
+	check(actor.placement.begin_world(gusset) and model.mesh == mesh, "Held gusset keeps the original model")
+	actor.placement.cancel()
+	gusset.global_transform = Transform3D(Basis.IDENTITY, Vector3(0.55, 0.026, 2.7))
+	await frames(3)
+	var bolt := install(Vector3(0.50, 1.3, 2.65), Vector3.DOWN)
+	check(gusset.fastened and model.mesh == mesh, "Installed gusset has the same triangle")
+	check(system.remove(bolt) and not gusset.fastened and model.mesh == mesh, "Detached gusset has the same triangle")
+
+	actor.global_position = Vector3(1.0, 0.02, 3.30)
+	await frames(3)
+	actor.camera.look_at(actor.camera.global_position + Vector3.FORWARD)
+	actor.set_tool_aiming(true)
+	await frames(15)
+	var sight := tool.to_global(Vector3(0, FasteningTool.SIGHT_HEIGHT, -0.16))
+	var local := actor.camera.to_local(sight)
+	check(tool.global_basis.is_equal_approx(actor.camera.global_basis) and absf(local.x) < 0.01 and absf(local.y) < 0.01
+		and tool.visible and not actor.equipment.presentation.obstructed, "Unobstructed ADS aligns the real sight and muzzle with the camera")
+	var blocker := wall("MuzzleTestBlocker", actor.camera.global_position + Vector3.FORWARD * 0.57,
+		Vector3(0.45, 0.45, 0.08))
+	await frames(9)
+	check(actor.equipment.presentation.obstructed and tool.visible,
+		"Near-wall ADS retracts the gun without hiding it or tilting its sights")
+	blocker.queue_free()
+	actor.set_tool_aiming(false)
+	await frames(22)
+	check(is_equal_approx(actor.camera.fov, actor.camera_fov) and actor.camera.to_local(tool.global_position).x > 0.20,
+		"RMB release restores the hip pose and normal FOV")
+	var ui := facility.get_node("InteractionUI")
+	ui.handle_fastening_input(action(&"drop_tool"))
+	check(actor.equipped_tool() == null and tool.state == InteractableObject.State.WORLD,
+		"X drops the Uni-Bolt through the dedicated action")
+
+
+func invalidated_edge() -> void:
+	var primary := piece("OrphanRecordPlate", Vector3(1.1, 1.4, 4.30), Vector3(0.38, 0.38, 0.04))
+	var support := wall("OrphanRecordSupport", Vector3(1.1, 1.4, 4.38), Vector3(0.55, 0.55, 0.10))
+	await frames()
+	var bolt := install(Vector3(1.1, 1.4, 3.7), Vector3.BACK)
+	var group := system.between(primary, support)
+	if group == null:
+		return
+	var failures_before := system.failed.size()
+	group.bolts.clear()
+	system.reconcile()
+	check(bolt.state == InstalledFastener.State.INVALIDATED and bolt.visual == null and not primary.fastened
+		and not primary.freeze and system.between(primary, support) == null and system.failed.size() == failures_before,
+		"Orphaned membership clears the visible bolt and constraint without inventing an overload")
+	primary.queue_free()
+	support.queue_free()
+	await frames()

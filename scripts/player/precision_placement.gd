@@ -33,6 +33,7 @@ var _seating_turn_fraction := 0.0
 var _grab_candidate: InteractableObject
 var _grab: InteractableObject
 var _world_anchor: Variant = null
+var _resume_offset := Vector3.ZERO
 var _supported := false
 var _supported_was_locked := false
 var _resting_pickup := false
@@ -85,7 +86,10 @@ func advance_drop(now: int = -1) -> void:
 	if is_instance_valid(_grab_candidate):
 		begin_world(_grab_candidate)
 	elif not is_active():
-		begin()
+		if actor.equipped_tool() != null:
+			grab_feedback.emit("Aim at a loose workpiece and hold G.")
+		else:
+			begin()
 
 func release_drop(now: int = -1) -> void:
 	if _pressed_at < 0:
@@ -96,7 +100,7 @@ func release_drop(now: int = -1) -> void:
 	if tapped:
 		if is_active():
 			confirm()
-		elif actor.equipment.held_item() != null:
+		elif actor.equipment.held_item() != null and actor.equipped_tool() == null:
 			actor.equipment.drop()
 
 func clear_gesture() -> void:
@@ -106,7 +110,7 @@ func clear_gesture() -> void:
 
 func begin() -> bool:
 	var item := actor.equipment.held_item()
-	if input_suspended or item == null or is_active():
+	if input_suspended or item == null or item is FasteningTool or is_active():
 		return false
 	var clearance := PlacementClearance.new()
 	if not clearance.configure(item) or not clearance.clear(item.global_transform, 1):
@@ -155,11 +159,14 @@ func begin_world(item: InteractableObject) -> bool:
 		item.sleeping = false
 	actor.equipment.presentation.request_pose(HeldItemPresentation.Pose.LOWERED)
 	_world_anchor = null
+	_resume_offset = Vector3.ZERO
 	_grab = item
 	_supported = supported
 	distance = clampf((item.global_position - actor.camera.global_position).dot(-actor.camera.global_basis.z),
 		minimum_distance, maximum_distance)
 	set_rotating(false)
+	if actor.tool_aiming:
+		pin_workpiece()
 	valid = not _resting_pickup
 	return true
 
@@ -167,8 +174,18 @@ func pin_workpiece() -> void:
 	if is_grabbing() and not _supported and not is_seating():
 		_world_anchor = _grab.global_position
 
+func resume_workpiece() -> void:
+	if _world_anchor == null:
+		return
+	var relative := actor.camera.to_local(_world_anchor)
+	_resume_offset = relative + Vector3.BACK * distance
+	_world_anchor = null
+
+func can_handoff_workpiece(item: InteractableObject) -> bool:
+	return _grab == item and not _supported and not is_seating() and _clearance.clear(item.global_transform)
+
 func handoff_workpiece(item: InteractableObject) -> bool:
-	if _grab != item or _supported or is_seating() or not _clearance.clear(item.global_transform):
+	if not can_handoff_workpiece(item):
 		return false
 	cancel()
 	return true
@@ -177,6 +194,7 @@ func _release_grab() -> void:
 	var item := _grab
 	_grab = null
 	_world_anchor = null
+	_resume_offset = Vector3.ZERO
 	item.state = InteractableObject.State.WORLD
 	item.support_carrier = null
 	item.move_speed_scale = 1.0
@@ -210,9 +228,6 @@ func set_rotating(enabled: bool) -> void:
 	_pending_turns.clear()
 
 func adjust_distance(steps: float) -> void:
-	if _world_anchor != null:
-		distance = clampf(actor.camera.global_position.distance_to(_world_anchor), minimum_distance, maximum_distance)
-		_world_anchor = null
 	distance = clampf(distance + steps * wheel_step, minimum_distance, maximum_distance)
 
 func rotate_from_mouse(relative: Vector2) -> void:
@@ -260,7 +275,7 @@ func _physics_process(delta: float) -> void:
 func target_position() -> Vector3:
 	if _world_anchor != null:
 		return _world_anchor
-	return actor.camera.global_position - actor.camera.global_basis.z * distance
+	return actor.camera.to_global(Vector3.FORWARD * distance + _resume_offset)
 
 func update_preview(delta: float) -> void:
 	if is_seating():
@@ -276,6 +291,7 @@ func update_preview(delta: float) -> void:
 		return
 	var response := response_factor(item.mass, lift_capacity())
 	var pose := item.global_transform
+	_resume_offset *= exp(-5.0 * delta)
 	var displacement := (target_position() - pose.origin) * (1.0 - exp(-follow_speed * response * delta))
 	if _resting_pickup:
 		if not _clearance.clear(pose):

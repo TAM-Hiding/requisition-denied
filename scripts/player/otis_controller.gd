@@ -44,11 +44,14 @@ func equipped_tool() -> FasteningTool:
 	return equipment.held_item() as FasteningTool if not equipment.placing else null
 
 func set_tool_aiming(active: bool) -> void:
+	var was_aiming := tool_aiming
 	tool_aiming = active and equipped_tool() != null
 	equipment.presentation.aim_requested = tool_aiming
 	if tool_aiming:
 		placement.set_rotating(false)
 		placement.pin_workpiece()
+	elif was_aiming:
+		placement.resume_workpiece()
 
 func _physics_process(delta: float) -> void:
 	if tool_aiming and (equipped_tool() == null or not controls_enabled or placement.input_suspended):
