@@ -19,8 +19,13 @@ var feedback_time: float = 0.0
 var e_pending: bool = false
 var e_elapsed: float = 0.0
 var e_consumed: bool = false
+var mechanical_panel: MechanicalSettingsPanel
+var _settings_mouse_mode := Input.MOUSE_MODE_CAPTURED
 var menu_actions: Array[StringName] = []
 @onready var otis: OtisController = get_parent().get_node("Otis")
+
+var application_focused := true
+var _mouse_mode_before_focus_loss := Input.MOUSE_MODE_VISIBLE
 
 func _ready() -> void:
 	hud = Control.new()
@@ -28,7 +33,7 @@ func _ready() -> void:
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(hud)
 	var heading := Label.new()
-	heading.text = "REQUISITION DENIED   /   RD–006"
+	heading.text = "REQUISITION DENIED   /   DEVELOPMENT"
 	heading.position = Vector2(24, 18)
 	hud.add_child(heading)
 	help = Label.new()
@@ -89,29 +94,45 @@ func _ready() -> void:
 	otis.equipment.feedback.connect(show_feedback)
 	otis.placement.grab_feedback.connect(show_feedback)
 	panel.hide()
+	mechanical_panel = MechanicalSettingsPanel.new()
+	var settings := otis.placement.mechanical_settings
+	settings.values.rotation.invert_horizontal = otis.placement.invert_horizontal_rotation
+	settings.values.rotation.invert_vertical = otis.placement.invert_vertical_rotation
+	mechanical_panel.settings = settings
+	mechanical_panel.hide()
+	hud.add_child(mechanical_panel)
+	mechanical_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	mechanical_panel.closed.connect(close_mechanical_settings)
+	mechanical_panel.changed.connect(apply_mechanical_settings)
+	if FileAccess.file_exists(MechanicalInteractionSettings.FILE_PATH):
+		var issue := settings.load_file()
+		if not issue.is_empty():
+			mechanical_panel.message.text = issue
+			show_feedback(issue)
+		mechanical_panel.refresh()
+	apply_mechanical_settings()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _physics_process(delta: float) -> void:
-	if get_parent().terminal_session.active:
+	if not application_focused or get_parent().terminal_session.active or mechanical_panel.visible:
 		return
 	var placing := otis.placement.is_active()
+	var socket := otis.placement.installation_candidate()
+	var mount_issue := ""
 	if placing:
 		help.text = "Wheel Range  •  G Place  •  Esc Cancel"
 		if not otis.placement.is_supported_grab():
 			help.text += "  •  Hold Middle Mouse Rotate"
 	else:
-		help.text = "WASD Move  •  E Context  •  Hold E Stow  •  1 Equip  •  G Drop / hold to place or grab  •  Esc Cursor  •  F3 Debug"
-	status.visible = not placing or not otis.placement.valid
+		help.text = "WASD Move  •  E Context  •  Hold E Stow  •  1 Equip  •  G Drop / hold to place or grab  •  Esc Cursor  •  F3 Debug  •  F4 Mechanics"
+	status.visible = not placing or not otis.placement.valid or socket != null
 	advance_hold(delta)
 	if gameplay_input_allowed():
 		otis.placement.advance_drop()
 	else:
-		if otis.placement.is_grabbing():
-			otis.placement.cancel()
-		else:
-			otis.placement.clear_gesture()
-			if otis.placement.rotating:
-				otis.placement.set_rotating(false)
+		otis.placement.clear_gesture()
+		if otis.placement.rotating:
+			otis.placement.set_rotating(false)
 	feedback_time = maxf(0, feedback_time - delta)
 	if feedback_time == 0:
 		status.text = ""
@@ -134,6 +155,11 @@ func _physics_process(delta: float) -> void:
 		prompt.text = "Left-click to resume"
 	elif otis.placement.is_supported_grab():
 		prompt.text = "SUPPORTED GRAB"
+	elif otis.placement.is_seating():
+		prompt.text = "SEATING  •  Esc Cancel"
+	elif socket != null:
+		mount_issue = otis.placement.installation_feedback(socket)
+		prompt.text = "[E] Install  •  %s" % otis.placement.installation_name() if mount_issue.is_empty() else mount_issue
 	elif placing:
 		var placement := otis.placement
 		prompt.text = "%s  |  %s" % [
@@ -168,8 +194,16 @@ func _physics_process(delta: float) -> void:
 
 	if debug_visible:
 		debug_label.text += get_parent().environmental_diagnostics()
+		if otis.placement.mechanical_settings.values.debug.show_alignment_diagnostics:
+			if socket != null:
+				debug_label.text += otis.placement.alignment_diagnostics(socket, mount_issue)
+			elif placing:
+				debug_label.text += "\nMOUNT  " + ("SEATING" if otis.placement.is_seating() else "NO CANDIDATE")
 
 func _input(event: InputEvent) -> void:
+	if not application_focused:
+		get_viewport().set_input_as_handled()
+		return
 	var terminal: TerminalInteraction = get_parent().terminal_session
 	if is_instance_valid(terminal) and terminal.active:
 		if event.is_action("ui_cancel") and event.is_echo():
@@ -178,10 +212,25 @@ func _input(event: InputEvent) -> void:
 		terminal.route(event)
 		get_viewport().set_input_as_handled()
 		return
+	if mechanical_panel.picker.visible:
+		return
 	if event is InputEventKey and event.echo:
+		return
+	if event is InputEventKey and event.physical_keycode == KEY_F4 and event.pressed:
+		if mechanical_panel.visible:
+			close_mechanical_settings()
+		elif not menu_open and not otis.placement.is_seating():
+			open_mechanical_settings()
+		get_viewport().set_input_as_handled()
+		return
+	if mechanical_panel.visible:
+		if event.is_action_pressed("ui_cancel"):
+			close_mechanical_settings()
+			get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("debug_overlay"):
 		debug_visible = not debug_visible
+		apply_mechanical_settings()
 		debug_label.visible = debug_visible
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("ui_cancel"):
@@ -199,7 +248,7 @@ func _input(event: InputEvent) -> void:
 		otis.placement.press_drop()
 		get_viewport().set_input_as_handled()
 	elif event.is_action_released("drop_item"):
-		if gameplay_input_allowed() or otis.placement.is_grabbing():
+		if gameplay_input_allowed():
 			otis.placement.release_drop()
 		else:
 			otis.placement.clear_gesture()
@@ -227,6 +276,8 @@ func _input(event: InputEvent) -> void:
 
 func handle_placement_controls(event: InputEvent) -> bool:
 	if event.is_action("interact") or event.is_action("equip_first"):
+		if event.is_action_pressed("interact") and otis.placement.installation_candidate() != null:
+			otis.placement.install_grab()
 		return true
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_MIDDLE:
@@ -249,7 +300,7 @@ func set_terminal_active(active: bool) -> void:
 	hud.visible = not active
 
 func gameplay_input_allowed() -> bool:
-	return not menu_open and otis.controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	return application_focused and not menu_open and not mechanical_panel.visible and otis.controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
 
 func cancel_hold() -> void:
 	e_pending = false
@@ -295,7 +346,7 @@ func rebuild_actions() -> void:
 		var button := Button.new()
 		button.text = String(action).replace("_", " ").capitalize()
 		var use_terminal: bool = action == &"use_terminal" and get_parent().terminal_session.is_target(menu_target)
-		button.disabled = action not in [&"inspect", &"pick_up", &"move"] and not use_terminal
+		button.disabled = action not in [&"inspect", &"pick_up", &"move", &"remove"] and not use_terminal
 		if button.disabled:
 			button.text += " — unavailable in RD-002"
 		button.pressed.connect(perform_action.bind(action))
@@ -325,11 +376,39 @@ func close_menu() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
-		if is_instance_valid(otis) and is_instance_valid(otis.placement):
-			otis.placement.clear_gesture()
-			otis.placement.set_rotating(false)
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and application_focused:
+		application_focused = false
+		_mouse_mode_before_focus_loss = Input.mouse_mode
 		cancel_hold()
-		if is_instance_valid(otis) and is_instance_valid(otis.placement) and otis.placement.is_grabbing():
-			otis.placement.cancel()
+		if is_instance_valid(otis) and is_instance_valid(otis.placement):
+			otis.placement.set_input_suspended(true)
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN and not application_focused:
+		application_focused = true
+		cancel_hold()
+		if is_instance_valid(otis) and is_instance_valid(otis.placement):
+			otis.placement.set_input_suspended(is_instance_valid(mechanical_panel) and mechanical_panel.visible)
+		Input.mouse_mode = _mouse_mode_before_focus_loss
+
+func open_mechanical_settings() -> void:
+	cancel_hold()
+	_settings_mouse_mode = Input.mouse_mode
+	otis.controls_enabled = false
+	otis.placement.set_input_suspended(true)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	mechanical_panel.refresh()
+	mechanical_panel.show()
+	mechanical_panel.reset_size()
+	mechanical_panel.position = (hud.size - mechanical_panel.size) * 0.5
+
+func close_mechanical_settings() -> void:
+	mechanical_panel.hide()
+	otis.controls_enabled = true
+	otis.placement.set_input_suspended(not application_focused)
+	Input.mouse_mode = _settings_mouse_mode
+
+func apply_mechanical_settings() -> void:
+	var values := otis.placement.mechanical_settings.values
+	otis.placement.pickup_debug = debug_visible and values.pickup.show_clearance_diagnostics
+	otis.placement.invert_horizontal_rotation = values.rotation.invert_horizontal
+	otis.placement.invert_vertical_rotation = values.rotation.invert_vertical
