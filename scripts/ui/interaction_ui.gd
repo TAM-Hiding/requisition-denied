@@ -363,6 +363,7 @@ func handle_fastening_input(event: InputEvent) -> bool:
 func set_terminal_active(active: bool) -> void:
 	cancel_hold()
 	otis.set_tool_aiming(false)
+	otis.equipment.presentation.set_station_active(active)
 	hud.visible = not active
 
 func active_station() -> TerminalInteraction:
@@ -482,3 +483,8 @@ func apply_mechanical_settings() -> void:
 	var fastening: FasteningSystem = get_parent().fastening
 	if is_instance_valid(fastening):
 		fastening.set_visual_scale_percent(values[MechanicalInteractionSettings.VISUAL_SCALE_KEY])
+
+
+func show_bolt_failure(bolt: InstalledFastener) -> void:
+	show_feedback("BOLT #%d FAILED UNDER LOAD · %.0f / %.0f" % [
+		bolt.id, bolt.load_estimate, bolt.grade.strength])

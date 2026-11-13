@@ -1,5 +1,7 @@
 class_name FasteningSystem
 extends Node3D
+
+signal bolt_failed(bolt: InstalledFastener)
 ## The logical graph owns fastener records. Each connected island has one
 ## simulated collider and no internal physics joints.
 const REACH := 0.1524
@@ -62,7 +64,7 @@ func probe(origin: Vector3, direction: Vector3, reach: float, actor: PhysicsBody
 	if not origin.is_finite() or not direction.is_finite() or direction.is_zero_approx() or not is_finite(reach) or reach <= 0.0:
 		return {"issue": "NO TARGET SURFACE"}
 	sync_probes()
-	var workpiece: InteractableObject
+	var workpiece: InteractableObject = null
 	if actor is OtisController:
 		workpiece = actor.placement.fastening_workpiece()
 		if is_instance_valid(workpiece):
@@ -161,7 +163,7 @@ func install(bolt: InstalledFastener, origin: Vector3, direction: Vector3, reach
 		return target.issue
 	var a: PhysicsBody3D = target.a
 	var b: PhysicsBody3D = target.b
-	var workpiece: InteractableObject
+	var workpiece: InteractableObject = null
 	for body in [a, b]:
 		if active_shapes(body).is_empty():
 			return "INVALID SURFACE"
@@ -261,6 +263,9 @@ func _physics_process(_delta: float) -> void:
 func sync_probes() -> void:
 	for proxy in _proxies:
 		if usable_body(proxy):
+			var source := proxy.get_parent() as PhysicsBody3D
+			if source != null and physics_root(source) == source and (not source is RigidBody3D or source.freeze):
+				sync_body_transform(source)
 			sync_body_transform(proxy)
 
 func sync_body_transform(body: PhysicsBody3D) -> void:
@@ -307,7 +312,7 @@ func target_bolt(origin: Vector3, direction: Vector3, reach: float, actor: Physi
 	var dir := direction.normalized()
 	var wall := cast(origin, origin + dir * reach, exclude, false, 1)
 	var limit: float = reach if wall.is_empty() else minf(reach, origin.distance_to(wall.position) + 0.004)
-	var nearest: InstalledFastener
+	var nearest: InstalledFastener = null
 	for group in connections:
 		for bolt in group.bolts:
 			if (not record_matches(group, bolt) or not usable_body(bolt.a) or not usable_body(bolt.b)
@@ -368,8 +373,7 @@ func incident(body: PhysicsBody3D) -> Array[FastenerConnection]:
 	return connections.filter(func(edge: FastenerConnection) -> bool: return edge.a == body or edge.b == body)
 
 func route(body: PhysicsBody3D) -> Array[FastenerConnection]:
-	# Prefer the shortest route to a fixed support. On a free island, the
-	# neighboring bodies provide the approximate inertial reaction.
+	# A full reaction exists only along a path to a fixed support.
 	var queue: Array[PhysicsBody3D] = [body]
 	var paths := {body: []}
 	while not queue.is_empty():
@@ -383,9 +387,10 @@ func route(body: PhysicsBody3D) -> Array[FastenerConnection]:
 			if not paths.has(next):
 				paths[next] = paths[current] + [group]
 				queue.append(next)
-	return incident(body)
+	return []
 
-func apply_structural_load(body: PhysicsBody3D, point: Vector3, force: Vector3) -> void:
+func apply_structural_load(body: PhysicsBody3D, point: Vector3, force: Vector3,
+		ram_contact := false) -> void:
 	if not is_instance_valid(body) or not point.is_finite() or not force.is_finite():
 		return
 	reconcile()
@@ -394,29 +399,95 @@ func apply_structural_load(body: PhysicsBody3D, point: Vector3, force: Vector3) 
 	var processed: Array[FastenerConnection] = []
 	# Re-route after a complete break, without loading unrelated branches of
 	# a now-separated island. Each bolt can fail at most once per call.
+	var failures_before := failed.size()
 	var path := route(body)
+	if path.is_empty():
+		if ram_contact:
+			apply_ram_inertia(body, force)
+			return
+		path = incident(body)
 	while not path.is_empty():
 		var group: FastenerConnection = path.pop_front()
 		if processed.has(group):
 			continue
 		processed.append(group)
-		while not group.bolts.is_empty():
-			group.estimate(point, force)
-			var weakest: InstalledFastener
-			var worst_ratio := 1.0
-			for bolt in group.bolts:
-				var ratio := bolt.load_estimate / bolt.grade.strength
-				if ratio > worst_ratio:
-					weakest = bolt
-					worst_ratio = ratio
-			if weakest == null:
-				break
-			unlink(group, weakest, true)
-		if group.bolts.is_empty():
+		if overload_group(group, point, force):
 			changed = true
+			# Once the support path breaks, only another live support can
+			# carry this same reaction. Free motion is evaluated separately.
 			path = route(body)
 	if changed:
 		rebuild()
+	report_failures(failures_before)
+
+func overload_group(group: FastenerConnection, point: Vector3, force: Vector3) -> bool:
+	while not group.bolts.is_empty():
+		group.estimate(point, force)
+		var weakest: InstalledFastener = null
+		var worst_ratio := 1.0
+		for bolt in group.bolts:
+			var ratio := bolt.load_estimate / bolt.grade.strength
+			if ratio > worst_ratio:
+				weakest = bolt
+				worst_ratio = ratio
+		if weakest == null:
+			return false
+		unlink(group, weakest, true)
+	return true
+
+## Free assemblies are accelerated by the ram. A branch transmits the
+## inertia of its downstream bodies, rather than the full contact force.
+## The centroid approximates the lever arm; cycles share no inferred load.
+func apply_ram_inertia(body: PhysicsBody3D, force: Vector3) -> void:
+	var root := physics_root(body) as RigidBody3D
+	if root == null or root.freeze or force.is_zero_approx():
+		return
+	var failures_before := failed.size()
+	var topology_changed := false
+	var queue: Array[PhysicsBody3D] = [body]
+	var visited := {body: true}
+	while not queue.is_empty():
+		var current: PhysicsBody3D = queue.pop_front()
+		for group in incident(current):
+			var next := group.other(current)
+			if visited.has(next):
+				continue
+			var branch := branch_mass(next, current, group)
+			visited[next] = true
+			if branch.is_empty():
+				continue
+			if overload_group(group, branch.center, force * (float(branch.mass) / root.mass)):
+				topology_changed = true
+			else:
+				queue.append(next)
+	if topology_changed:
+		rebuild()
+	report_failures(failures_before)
+
+func branch_mass(start: PhysicsBody3D, upstream: PhysicsBody3D, excluded: FastenerConnection) -> Dictionary:
+	var queue: Array[PhysicsBody3D] = [start]
+	var visited := {start: true}
+	var total := 0.0
+	var weighted := Vector3.ZERO
+	while not queue.is_empty():
+		var body: PhysicsBody3D = queue.pop_front()
+		if body == upstream or not body is RigidBody3D:
+			return {}
+		var kilograms: float = _root_masses.get(body, body.mass)
+		total += kilograms
+		weighted += body.global_position * kilograms
+		for group in incident(body):
+			if group == excluded:
+				continue
+			var next := group.other(body)
+			if not visited.has(next):
+				visited[next] = true
+				queue.append(next)
+	return {"mass": total, "center": weighted / total}
+
+func report_failures(previous_count: int) -> void:
+	for index in range(previous_count, failed.size()):
+		bolt_failed.emit(failed[index])
 
 func installed_count() -> int:
 	var count := 0
@@ -486,12 +557,15 @@ func rebuild() -> void:
 		if not is_instance_valid(body):
 			continue
 		var saved: Dictionary = _followers[body]
-		var parent: Node = saved.parent if is_instance_valid(saved.parent) else get_parent()
+		var parent := get_parent()
+		if is_instance_valid(saved.parent):
+			parent = saved.parent
 		if body.get_parent() != parent:
 			body.reparent(parent)
 		body.collision_layer = saved.layer
 		body.collision_mask = saved.mask
 		body.freeze = saved.frozen
+		sync_body_transform(body)
 		body.sleeping = false
 		if velocities.has(body):
 			body.linear_velocity = velocities[body][0]
@@ -552,6 +626,8 @@ func build_island(island: Array[PhysicsBody3D]) -> void:
 		member.reparent(root)
 		if _root_masses.has(root):
 			root.mass += member.mass
+	if root is RigidBody3D and not root.freeze:
+		root.sleeping = false
 
 func active_shapes(body: PhysicsBody3D) -> Array[CollisionShape3D]:
 	var shapes: Array[CollisionShape3D] = []
@@ -573,8 +649,8 @@ func make_probe(body: PhysicsBody3D) -> void:
 func copy_shape(parent: PhysicsBody3D, source: CollisionShape3D) -> CollisionShape3D:
 	var collider := CollisionShape3D.new()
 	collider.shape = source.shape
+	collider.transform = parent.global_transform.affine_inverse() * source.global_transform
 	parent.add_child(collider)
-	collider.global_transform = source.global_transform
 	return collider
 
 func diagnostics(aim: Dictionary) -> String:

@@ -381,6 +381,7 @@ func build_fastening_station(crate: InteractableObject, dark: Material, amber: M
 	fastening = FasteningSystem.new()
 	fastening.name = "FasteningSystem"
 	add_child(fastening)
+	fastening.bolt_failed.connect($InteractionUI.show_bolt_failure)
 	fastening.set_visual_scale_percent($Otis.placement.mechanical_settings.values[MechanicalInteractionSettings.VISUAL_SCALE_KEY])
 	bolt_tool = FasteningTool.new()
 	bolt_tool.name = "UniBoltTool"

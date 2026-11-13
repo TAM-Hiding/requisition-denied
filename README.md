@@ -229,7 +229,11 @@ collision and inherit the island's velocity. The load estimate shares direct
 force and adds a moment based on application point, direction and bolt
 spacing. The most overloaded bolt fails first and the surviving bolts are
 evaluated again. Anchored islands use the shortest available path to a fixed
-support. This is an authored gameplay model for ram and explicit test loads.
+support. After that path breaks, a new support must exist to carry the same
+reaction. On later ram contacts, a free island transmits acceleration loads
+based on downstream mass and its lever arm. Redundant loops have no inferred
+free-island branch load. This is a gameplay approximation for ram and explicit
+test loads. A committed bolt that overloads reports its failure in the HUD.
 Ordinary collisions do not accumulate fastener damage. Compound islands can
 be pushed physically. To precision-grab an individual member, detach it
 first. Fastening data and ammunition remain session-local.

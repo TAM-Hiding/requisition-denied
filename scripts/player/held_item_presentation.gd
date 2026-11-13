@@ -5,6 +5,7 @@ enum Pose { NORMAL, LOWERED }
 var requested_pose: Pose = Pose.NORMAL
 var pose_blend: float = 0.0
 var aim_requested := false
+var station_active := false
 var aim_blend := 0.0
 var lateral_shift: float = 0.0
 var item: InteractableObject
@@ -54,6 +55,14 @@ func _process(delta: float) -> void:
 	# Runs after input and physics, before rendering: rotation is checked even
 	# on render frames between physics ticks, including sudden camera turns.
 	update_pose(delta)
+
+func set_station_active(active: bool) -> void:
+	station_active = active
+	_previous_valid = false
+	if active and is_instance_valid(item):
+		item.hide()
+	elif not active:
+		update_pose(0.0)
 
 func query(shape: Shape3D, transform: Transform3D, motion: Vector3 = Vector3.ZERO) -> PhysicsShapeQueryParameters3D:
 	var parameters := PhysicsShapeQueryParameters3D.new()
@@ -116,6 +125,9 @@ func update_pose(delta: float) -> void:
 	if absf(pose_blend - target) < 0.0001:
 		pose_blend = target
 	if not is_instance_valid(item) or item.state != InteractableObject.State.HELD:
+		return
+	if station_active:
+		item.hide()
 		return
 	if profile.envelope == null:
 		item.hide()

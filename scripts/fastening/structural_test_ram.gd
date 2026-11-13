@@ -87,16 +87,21 @@ func update_stroke_visuals() -> void:
 	fit_rod(rod_sleeve, guide_exit - 0.04, joint + 0.015)
 	fit_rod(rod_core, joint - 0.025, plate_back)
 
-func fit_rod(rod: MeshInstance3D, start: float, end: float) -> void:
-	rod.position.x = (start + end) * 0.5
-	rod.scale.y = end - start
+func fit_rod(rod: MeshInstance3D, start: float, endpoint: float) -> void:
+	rod.position.x = (start + endpoint) * 0.5
+	rod.scale.y = endpoint - start
 
 func step_drive(delta: float) -> void:
 	var axis := global_basis.x.normalized()
 	var desired := move_toward(travel, STROKE if drive == Drive.EXTEND else 0.0, SPEED * delta)
+	# At full stroke, a short forward contact probe keeps the powered
+	# reaction alive without permitting travel beyond the stroke limit.
+	var probe_distance := desired - travel
+	if drive == Drive.EXTEND and is_equal_approx(travel, STROKE):
+		probe_distance = SPEED * delta
 	var motion := PhysicsTestMotionParameters3D.new()
 	motion.from = face.global_transform
-	motion.motion = axis * (desired - travel)
+	motion.motion = axis * probe_distance
 	motion.margin = 0.003
 	motion.recovery_as_collision = true
 	var contact := PhysicsTestMotionResult3D.new()
@@ -120,7 +125,7 @@ func step_drive(delta: float) -> void:
 			var required := maxf(0.0, SPEED - root.linear_velocity.dot(axis)) * root.mass / maxf(delta, 0.0001)
 			actual_load = minf(actual_load, required)
 		if not system.anchored(body):
-			system.apply_structural_load(body, contact.get_collision_point(), axis * actual_load)
+			system.apply_structural_load(body, contact.get_collision_point(), axis * actual_load, true)
 		root = system.physics_root(body) as RigidBody3D
 		if is_instance_valid(root) and not root.freeze:
 			# The kinematic face does not shove contacts itself. The only drive

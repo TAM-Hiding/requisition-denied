@@ -284,11 +284,64 @@ func rig() -> void:
 	check(ram.rod_sleeve.scale.y + ram.rod_core.scale.y > closed_rod_length + 1.0
 		and is_equal_approx(ram.rod_core.position.x + ram.rod_core.scale.y * 0.5, ram.face.position.x - 0.0525)
 		and is_equal_approx(ram.face.position.x, ram.travel), "Visible rod ends at the swept collision plate at stall")
+	var side := piece("LoadedSideBracket", Vector3(-2.45, 0.72, 0.183), Vector3(0.34, 0.26, 0.04))
+	var actor_position := Vector3(-2.45, 0.02, 1.55)
+	actor.global_position = actor_position
+	check(actor.equipment.pick_up(tool).ok, "Equip tool for live hydraulic contact")
+	await frames(3)
+	var side_bolt := fasten_held_at_ram(side, ram)
+	check(side_bolt != null and side.fastened and ram.stalled, "Fresh workpiece installs while the powered ram is stalled")
+	if side_bolt == null:
+		actor.placement.cancel()
 	ram.change_force(20)
 	check(ram.force_limit() > 9999.0, "Rig setting can exceed MegaBolt strength")
 	await frames(35)
-	check(bolt.state == InstalledFastener.State.FAILED and not crate.fastened and ram.displacement > 0.015,
+	check(bolt.state == InstalledFastener.State.FAILED and system.physics_root(crate) == crate and ram.displacement > 0.015,
 		"High force breaks the anchor and drives the now-free crate")
+	if side_bolt != null:
+		check(side_bolt.state == InstalledFastener.State.INSTALLED and side.fastened,
+			"Side connection survives anchor failure and subsequent ram acceleration")
+		check(system.remove(side_bolt), "Side bracket can be released after the anchor fails")
+		await frames(2)
+		actor.camera.look_at(side.global_position)
+		check(actor.placement.begin_world(side), "Detached bracket retains a valid pickup path")
+		actor.placement.cancel()
+		side.global_transform = Transform3D(Basis.IDENTITY, crate.to_global(Vector3(0.05, 0.07, 0.683)))
+		side.linear_velocity = Vector3.ZERO
+		side.angular_velocity = Vector3.ZERO
+		await frames(2)
+		var replacement := fasten_held_at_ram(side, ram)
+		check(replacement != null and ram.drive == StructuralTestRam.Drive.EXTEND,
+			"Previously attached workpiece can be refastened while the ram is still powered")
+		if replacement != null:
+			var ui := facility.get_node("InteractionUI")
+			system.apply_structural_load(side, replacement.head(), Vector3.RIGHT * 101.0)
+			check(replacement.state == InstalledFastener.State.FAILED and ui.status.text.contains("FAILED UNDER LOAD")
+				and ui.status.text.contains("#%d" % replacement.id),
+				"A real overload after installation reports the failed bolt instead of a rejected shot")
+			check(not side.fastened and not side.freeze, "Overload leaves a previously damaged workpiece usable")
+			side.global_transform = Transform3D(Basis.IDENTITY, crate.to_global(Vector3(0.05, 0.07, 0.683)))
+			side.linear_velocity = Vector3.ZERO
+			await frames(2)
+			var repaired := fasten_held_at_ram(side, ram)
+			check(repaired != null, "A new bolt repairs the failed connection while the ram remains powered")
+			if repaired != null:
+				system.remove(repaired)
+	actor.placement.cancel()
+	side.queue_free()
+	await frames(2)
+	# A lightweight part survives normal acceleration but can still fail
+	# when a genuinely large force is transmitted through its branch.
+	var heavy_side := piece("TransferSpecimen", crate.to_global(Vector3(0, 0.07, 0.683)),
+		Vector3(0.34, 0.26, 0.04), 25.0)
+	await frames(2)
+	var transferred := install(heavy_side.global_position + Vector3.BACK, Vector3.FORWARD)
+	if transferred.state == InstalledFastener.State.INSTALLED:
+		system.apply_structural_load(crate, crate.global_position, Vector3.RIGHT * 400.0, true)
+		check(transferred.state == InstalledFastener.State.FAILED and transferred.load_estimate > 100.0,
+			"A genuinely loaded free branch still overloads under transferred inertia")
+	heavy_side.queue_free()
+	await frames(2)
 	var count := system.failed.size()
 	ram.reset_ram()
 	await frames(380)
@@ -313,6 +366,21 @@ func rig() -> void:
 	await frames(20)
 	check(ram.travel < retract_from - 0.08 and ram.actual_load == 0.0,
 		"Drive reversal retracts without applying a test force")
+	ram.set_drive(StructuralTestRam.Drive.IDLE)
+	var full_contact := wall("EndOfStrokeStop", ram.to_global(Vector3(StructuralTestRam.STROKE + 0.106, 0, 0)),
+		Vector3(0.10, 0.38, 0.48))
+	crate.global_position = Vector3(-2.5, 0.65, 2.3)
+	crate.linear_velocity = Vector3.ZERO
+	ram.travel = StructuralTestRam.STROKE
+	ram.face.position.x = ram.travel
+	await frames(3)
+	ram.set_drive(StructuralTestRam.Drive.EXTEND)
+	await frames(3)
+	check(ram.stalled and ram.drive == StructuralTestRam.Drive.EXTEND and ram.actual_load > 0
+		and is_equal_approx(ram.travel, StructuralTestRam.STROKE), "Full-stroke contact stays powered without exceeding travel")
+	ram.set_drive(StructuralTestRam.Drive.IDLE)
+	full_contact.queue_free()
+
 
 func action(name: StringName, pressed := true) -> InputEventAction:
 	var event := InputEventAction.new()
@@ -588,6 +656,7 @@ func terminal_preferences() -> void:
 	actor.camera.look_at(workstation.global_position)
 	check(station.enter() and actor.equipped_tool() == tool and actor.placement.input_suspended,
 		"Administrative CRT opens while the Uni-Bolt is equipped")
+	check(not tool.visible and actor.equipment.presentation.station_active, "Administrative CRT hides the equipped tool")
 	var screen := station.screen_ui
 	screen.show_section("Settings")
 	var panel := screen.settings_panel
@@ -684,6 +753,12 @@ func hydraulic_pillar() -> void:
 	await frames(3)
 	actor.camera.look_at(pillar.global_position + Vector3.UP * 1.13)
 	ui.target = pillar
+	var presentation := actor.equipment.presentation
+	var obstruction := wall("PillarToolOccluder", actor.camera.to_global(Vector3(0.24, -0.25, -0.64)),
+		Vector3(0.22, 0.25, 0.18))
+	await frames(2)
+	presentation.update_pose(0.2)
+	check(presentation.obstructed and actor.equipped_tool() == tool, "Pillar opens with retraction already active")
 	if DisplayServer.get_name() == "headless":
 		station.enter()
 	else:
@@ -726,8 +801,15 @@ func hydraulic_pillar() -> void:
 	check(is_zero_approx(ram.travel) and system.failed.size() == failed_count, "Pillar RESET homes without repairing")
 	var before := tool.rounds.size()
 	ui._input(action(&"tool_primary"))
-	check(tool.rounds.size() == before and actor.equipped_tool() == tool, "Pillar owns input while operating")
+	check(tool.rounds.size() == before and actor.equipped_tool() == tool and not tool.visible,
+		"Pillar owns input and hides the equipped tool")
+	actor.equipment.presentation.update_pose(0.2)
+	check(not tool.visible, "Per-frame presentation cannot uncover the pillar")
+	obstruction.queue_free()
 	station.leave()
+	check(not actor.equipment.presentation.station_active and actor.equipped_tool() == tool,
+		"Leaving the pillar restores the held presentation")
+
 	ram.set_force_index(initial)
 
 
@@ -778,3 +860,18 @@ func adaptive_bolt_visuals() -> void:
 		primary.queue_free()
 		backing.queue_free()
 		await frames()
+
+
+func fasten_held_at_ram(workpiece: InteractableObject, ram: StructuralTestRam) -> InstalledFastener:
+	actor.camera.look_at(workpiece.global_position)
+	if not actor.placement.begin_world(workpiece):
+		check(false, "Workpiece has a clear pickup path near the ram")
+		return null
+	actor.set_tool_aiming(true)
+	tool.removing = false
+	var fastener := tool.rounds.back() as InstalledFastener
+	var result := tool.use(actor.camera, actor)
+	actor.set_tool_aiming(false)
+	check(result.begins_with("INSTALLED") and not actor.placement.is_active()
+		and ram.drive == StructuralTestRam.Drive.EXTEND, "Successful live shot releases the grab: " + result)
+	return fastener if fastener.state == InstalledFastener.State.INSTALLED else null

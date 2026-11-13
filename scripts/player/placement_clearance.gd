@@ -150,17 +150,20 @@ func pickup_pose(pose: Transform3D, debug_failure := false, preferred := Vector3
 			var blocked := PhysicsServer3D.body_test_motion(item.get_rid(), motion, result)
 			var candidate := pose
 			candidate.origin += result.get_travel()
-			var destination := space.intersect_shape(query(candidate, 3), 1)
-			if not blocked and result.get_travel().length() <= PICKUP_LIMIT and destination.is_empty():
+			if not blocked and result.get_travel().length() <= PICKUP_LIMIT and clear(candidate):
 				return candidate
 			if debug_failure:
-				var body: Object
+				var body: Object = null
 				if result.get_collision_count() > 0:
 					body = result.get_collider()
-				elif not destination.is_empty():
-					body = destination[0].collider
+				else:
+					for part in shapes:
+						var hits := space.intersect_shape(query(candidate, 3, 0.0, part), 1)
+						if not hits.is_empty():
+							body = hits[0].collider
+							break
 				attempts.append({"direction": direction, "destination": candidate.origin,
-					"result": "path" if blocked else "destination" if not destination.is_empty() else "recovery limit",
+					"result": "path" if blocked else "destination" if is_instance_valid(body) else "recovery limit",
 					"blocker": _pickup_blocker(body)})
 	if debug_failure:
 		var contacts := space.intersect_shape(initial, 8)
