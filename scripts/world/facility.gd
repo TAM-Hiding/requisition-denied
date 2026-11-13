@@ -396,9 +396,9 @@ func build_fastening_station(crate: InteractableObject, dark: Material, amber: M
 	box(bolt_tool, "Magazine", Vector3(0.11, 0.073, 0.12), Vector3(0, -0.055, -0.005), steel)
 	box(bolt_tool, "Identification", Vector3(0.152, 0.026, 0.08), Vector3(0, 0.041, 0.042), amber)
 	bolt_tool.indicator = material(Color("83d6a8"), true)
-	box(bolt_tool, "Status", Vector3(0.020, 0.010, 0.034), Vector3(0, 0.102, 0.085), bolt_tool.indicator)
-	box(bolt_tool, "FrontSight", Vector3(0.010, 0.014, 0.012), Vector3(0, 0.082, -0.165), amber)
-	add_shape(bolt_tool, Vector3(0.155, 0.22, 0.39), Vector3(0, 0, -0.015))
+	box(bolt_tool, "Status", Vector3(0.020, 0.010, 0.034), Vector3(0.043, 0.101, 0.085), bolt_tool.indicator)
+	build_uni_bolt_sights(dark, steel)
+	add_shape(bolt_tool, Vector3(0.155, 0.236, 0.39), Vector3(0, 0.008, -0.015))
 	var tool_shape := bolt_tool.get_child(bolt_tool.get_child_count() - 1) as CollisionShape3D
 	tool_shape.name = "CollisionShape3D"
 	var tool_profile := HeldItemProfile.new()
@@ -408,9 +408,6 @@ func build_fastening_station(crate: InteractableObject, dark: Material, amber: M
 	tool_profile.lateral_clearance_limit = 0.0
 	tool_profile.anticipation_margin = 0.025
 	bolt_tool.definition.held_profile = tool_profile
-	for side in [-1, 1]:
-		box(bolt_tool, "RearSight", Vector3(0.009, 0.019, 0.018),
-			Vector3(side * 0.017, FasteningTool.SIGHT_HEIGHT - 0.005, 0.115), dark)
 	bolt_tool.replenish()
 
 	var plate := stock_piece(&"RD-STOCK-PLATE", "Steel plate", 4.0,
@@ -540,6 +537,17 @@ func build_ram_pillar(dark: Material, amber: Material) -> void:
 	add_child(ram_session)
 	ram_session.configure_ram($Otis, pillar, test_ram, screen, anchor, display)
 	ram_session.active_changed.connect($InteractionUI.set_terminal_active)
+
+func build_uni_bolt_sights(dark: Material, steel: Material) -> void:
+	var insert := material(Color("78be8e"), true)
+	insert.emission_energy_multiplier = 0.40
+	box(bolt_tool, "ForkBase", Vector3(0.064, 0.012, 0.035), Vector3(0, 0.081, -0.161), steel)
+	for side in [-1, 1]:
+		box(bolt_tool, "ForkEar", Vector3(0.016, 0.038, 0.033), Vector3(side * 0.024, 0.101, -0.161), dark)
+		box(bolt_tool, "ForkInsert", Vector3(0.003, 0.008, 0.018), Vector3(side * 0.015, 0.111, -0.161), insert)
+	var tip := FasteningTool.REAR_SIGHT_TIP
+	box(bolt_tool, "RearProng", Vector3(0.009, 0.010, 0.017), tip - Vector3.UP * 0.008, dark)
+	box(bolt_tool, "RearProngTip", Vector3(0.007, 0.004, 0.012), tip - Vector3.UP * 0.002, insert)
 
 func ram_rod(parent: Node3D, title: String, radius: float, surface: Material) -> MeshInstance3D:
 	var instance := MeshInstance3D.new()

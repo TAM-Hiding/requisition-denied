@@ -171,7 +171,8 @@ func _physics_process(delta: float) -> void:
 	if not hit.is_empty() and hit.collider is InteractableObject:
 		target = hit.collider
 		target_distance = otis.camera.global_position.distance_to(hit.position)
-	crosshair.visible = not menu_open and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	crosshair.visible = not menu_open and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
+		and not otis.equipment.presentation.sight_replaces_crosshair()
 	crosshair.modulate = Color("a2e7df") if target != null else Color.WHITE
 	if menu_open:
 		prompt.text = ""

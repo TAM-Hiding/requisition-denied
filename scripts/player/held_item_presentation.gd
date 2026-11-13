@@ -68,7 +68,16 @@ func query(shape: Shape3D, transform: Transform3D, motion: Vector3 = Vector3.ZER
 func pose_origin_camera() -> Vector3:
 	var base := actor.camera.to_local(anchor.global_position)
 	var normal := base + profile.lowered_offset * pose_blend
-	return Vector3(0.27, -0.25, -0.56).lerp(Vector3(0, -FasteningTool.SIGHT_HEIGHT, -0.48), aim_blend) 		if item is FasteningTool else normal
+	if item is FasteningTool:
+		var aim := Vector3(0, -FasteningTool.REAR_SIGHT_TIP.y, -0.48)
+		return Vector3(0.27, -0.25, -0.56).lerp(aim, aim_blend)
+	return normal
+
+func sight_replaces_crosshair() -> bool:
+	if not aim_requested or aim_blend < 0.999 or not is_instance_valid(item) or not item.visible:
+		return false
+	var tip := actor.camera.to_local(item.to_global(FasteningTool.REAR_SIGHT_TIP))
+	return absf(tip.x) < 0.001 and absf(tip.y) < 0.001 and -tip.z > actor.camera.near + 0.01
 
 func presentation_basis() -> Basis:
 	return actor.camera.global_basis if item is FasteningTool else anchor.global_basis

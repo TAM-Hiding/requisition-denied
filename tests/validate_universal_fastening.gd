@@ -42,6 +42,7 @@ func run() -> void:
 	await repeated_construction()
 	await held_same_tick()
 	await terminal_preferences()
+	await adaptive_bolt_visuals()
 	await hydraulic_pillar()
 	await pose_and_gusset()
 	await invalidated_edge()
@@ -488,10 +489,21 @@ func pose_and_gusset() -> void:
 	actor.camera.look_at(actor.camera.global_position + Vector3.FORWARD)
 	actor.set_tool_aiming(true)
 	await frames(15)
-	var sight := tool.to_global(Vector3(0, FasteningTool.SIGHT_HEIGHT, -0.16))
+	var sight := tool.to_global(FasteningTool.REAR_SIGHT_TIP)
 	var local := actor.camera.to_local(sight)
 	check(tool.global_basis.is_equal_approx(actor.camera.global_basis) and absf(local.x) < 0.01 and absf(local.y) < 0.01
 		and tool.visible and not actor.equipment.presentation.obstructed, "Unobstructed ADS aligns the real sight and muzzle with the camera")
+	var rear := tool.get_node("RearProngTip") as Node3D
+	var prong_top := rear.to_global(Vector3.UP * 0.002)
+	var center := root.get_visible_rect().get_center()
+	check(prong_top.is_equal_approx(sight)
+		and actor.camera.unproject_position(prong_top).distance_to(center) < 0.1
+		and actor.equipment.presentation.sight_replaces_crosshair(),
+		"Lit prong top projects onto the center ray and replaces the ADS reticle")
+	for reach_m in [0.5, 2.3]:
+		var ray_point: Vector3 = actor.camera.global_position - actor.camera.global_basis.z * reach_m
+		check(actor.camera.unproject_position(ray_point).distance_to(actor.camera.unproject_position(prong_top)) < 0.1,
+			"Prong and fastening ray agree at %.1f m" % reach_m)
 	var blocker := wall("MuzzleTestBlocker", actor.camera.global_position + Vector3.FORWARD * 0.57,
 		Vector3(0.45, 0.45, 0.08))
 	await frames(9)
@@ -500,7 +512,8 @@ func pose_and_gusset() -> void:
 	blocker.queue_free()
 	actor.set_tool_aiming(false)
 	await frames(22)
-	check(is_equal_approx(actor.camera.fov, actor.camera_fov) and actor.camera.to_local(tool.global_position).x > 0.20,
+	check(is_equal_approx(actor.camera.fov, actor.camera_fov) and actor.camera.to_local(tool.global_position).x > 0.20
+		and not actor.equipment.presentation.sight_replaces_crosshair(),
 		"RMB release restores the hip pose and normal FOV")
 	var ui := facility.get_node("InteractionUI")
 	ui.handle_fastening_input(action(&"drop_tool"))
@@ -651,7 +664,7 @@ func terminal_preferences() -> void:
 	system.apply_structural_load(primary, bolt.head(), Vector3.RIGHT * 700.0)
 	check(bolt.state == InstalledFastener.State.FAILED, "Grade 8 still fails at its mechanical rating")
 	settings.apply(saved)
-	check(is_equal_approx(bolt.visual.scale.x, 1.0) and is_equal_approx(bolt.visual.scale.z, 0.35),
+	check(is_equal_approx(bolt.visual.scale.x, 1.0) and bolt.visual.has_node("ShearedNub") and not bolt.visual.has_node("Tip"),
 		"Broken remnants also update immediately and stay shortened")
 	if fresh.state == InstalledFastener.State.INSTALLED:
 		system.remove(fresh)
@@ -730,3 +743,38 @@ func click_station_button(station: TerminalInteraction, button: Button) -> void:
 		click.position = position
 		click.pressed = down
 		ui._input(click)
+
+func adaptive_bolt_visuals() -> void:
+	for thickness in [0.010, 0.020, 0.050, 0.100, 0.140]:
+		var point := Vector3(3.15, 2.95, 4.34)
+		var primary := piece("VisualFront", point + Vector3.BACK * 0.002, Vector3(0.3, 0.3, 0.004))
+		var backing := wall("VisualBacking", point + Vector3.BACK * (thickness + 0.004) * 0.5,
+			Vector3(0.4, 0.4, thickness - 0.004))
+		await frames()
+		var range_m: float = 0.48 if thickness < 0.05 else 2.30
+		var origin := point - Vector3.BACK * range_m
+		var bolt := install(origin, Vector3.BACK)
+		if bolt.state == InstalledFastener.State.INSTALLED:
+			var tip := bolt.visual.get_node("Tip") as MeshInstance3D
+			var shaft := bolt.visual.get_node("Shaft") as MeshInstance3D
+			var expected: float = thickness + FasteningSystem.EXPOSED_TIP
+			check(absf(bolt.visual_length - expected) < 0.001,
+				"Measured %.0f mm stack gets a 10 mm exposed tip" % (thickness * 1000))
+			system.set_visual_scale_percent(180)
+			check(is_equal_approx(bolt.visual.scale.x, 1.8) and is_equal_approx(bolt.visual.scale.y, 1.8)
+				and is_equal_approx(bolt.visual.scale.z, 1.0)
+				and absf(tip.position.z - (tip.mesh as CylinderMesh).height * 0.5 + expected) < 0.001
+				and is_equal_approx(shaft.global_basis.x.length(), 1.8),
+				"Live 180 percent scale changes shaft radius and preserves tip depth")
+			check(system.target_bolt(origin + Vector3.RIGHT * 0.020, Vector3.BACK, 3.0) == bolt,
+				"Shortened bolt keeps its enlarged removal target")
+			if is_equal_approx(thickness, 0.01):
+				system.apply_structural_load(primary, bolt.head(), Vector3.RIGHT * 150.0)
+				check(bolt.visual.has_node("ShearedNub") and not bolt.visual.has_node("Tip")
+					and is_equal_approx(bolt.visual.scale.x, 1.8), "Failure creates a blunt, radially scaled nub")
+			else:
+				check(system.remove(bolt), "Adaptive bolt removes through the normal path")
+		system.set_visual_scale_percent(100)
+		primary.queue_free()
+		backing.queue_free()
+		await frames()

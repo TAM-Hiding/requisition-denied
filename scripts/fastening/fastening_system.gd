@@ -3,6 +3,10 @@ extends Node3D
 ## The logical graph owns fastener records. Each connected island has one
 ## simulated collider and no internal physics joints.
 const REACH := 0.1524
+const EXPOSED_TIP := 0.010
+const TIP_LENGTH := 0.006
+const SHEARED_LENGTH := 0.015
+const HEAD_FACE_OFFSET := 0.008
 const MAX_GAP := 0.025
 const PROBE_LAYER := 8
 var connections: Array[FastenerConnection] = []
@@ -123,6 +127,7 @@ func probe(origin: Vector3, direction: Vector3, reach: float, actor: PhysicsBody
 		result.issue = "NO SECONDARY MATERIAL IN CONTACT"
 		return result
 	result.backing = backing.position
+	result.backing_rid = backing.rid
 	for body in [a, b]:
 		if body is InteractableObject and body.state == InteractableObject.State.CARRIED:
 			if not actor is OtisController or not actor.placement.can_handoff_workpiece(body):
@@ -175,7 +180,8 @@ func install(bolt: InstalledFastener, origin: Vector3, direction: Vector3, reach
 
 	# Stage the visual before ownership changes. A rejected handoff has no
 	# effect on the magazine, the original grab or the connection graph.
-	var visual := make_bolt_visual(bolt)
+	var display_length := estimate_visual_length(target)
+	var visual := make_bolt_visual(bolt, display_length)
 	if workpiece != null and not actor.placement.handoff_workpiece(workpiece):
 		visual.free()
 		return "WORKPIECE NEEDS CLEARANCE"
@@ -195,6 +201,7 @@ func install(bolt: InstalledFastener, origin: Vector3, direction: Vector3, reach
 	bolt.group_id = group.id
 	bolt.state = InstalledFastener.State.INSTALLED
 	bolt.load_estimate = 0.0
+	bolt.visual_length = display_length
 	attach_visual(bolt, visual)
 	_installed[bolt.id] = bolt
 	group.bolts.append(bolt)
@@ -270,13 +277,22 @@ func set_visual_scale_percent(percent: int) -> void:
 	for bolt in failed:
 		update_bolt_visual(bolt)
 
+## The backwards probe is presentation-only. A missing or ambiguous far
+## face leaves a short shaft embedded near the entry into the backing.
+func estimate_visual_length(target: Dictionary) -> float:
+	var start: Vector3 = target.point
+	var normal: Vector3 = target.normal
+	var fallback := minf(REACH, float(target.depth) + EXPOSED_TIP)
+	var far := cast(start - normal * (REACH + 0.002), target.backing, [], true)
+	if far.is_empty() or far.rid != target.backing_rid or far.normal.dot(-normal) < 0.5:
+		return fallback
+	return clampf(start.distance_to(far.position) + EXPOSED_TIP, fallback, REACH)
+
 func update_bolt_visual(bolt: InstalledFastener) -> void:
 	if not is_instance_valid(bolt.visual):
 		return
-	var scale := Vector3.ONE * visual_scale
-	if bolt.state == InstalledFastener.State.FAILED:
-		scale.z *= 0.35
-	bolt.visual.transform = Transform3D(bolt.local_orientation.scaled_local(scale), bolt.local_a)
+	bolt.visual.transform = Transform3D(
+		bolt.local_orientation.scaled_local(Vector3(visual_scale, visual_scale, 1.0)), bolt.local_a)
 
 func between(a: PhysicsBody3D, b: PhysicsBody3D) -> FastenerConnection:
 	for group in connections:
@@ -301,7 +317,7 @@ func target_bolt(origin: Vector3, direction: Vector3, reach: float, actor: Physi
 			var normal := (bolt.a.global_basis * bolt.local_orientation.z).normalized()
 			if normal.dot(dir) >= -0.1:
 				continue
-			var offset := bolt.head() + normal * (0.008 * visual_scale) - origin
+			var offset := bolt.head() + normal * HEAD_FACE_OFFSET - origin
 			var depth := offset.dot(dir)
 			if depth > 0.0 and depth < limit and (offset - dir * depth).length() < minf(0.014 * visual_scale, 0.035):
 				limit = depth
@@ -329,8 +345,9 @@ func unlink(group: FastenerConnection, bolt: InstalledFastener, broken: bool) ->
 	if broken:
 		failed.append(bolt)
 		last_failed_group = group.id
-		# A short, dull remnant marks the failure location.
-		update_bolt_visual(bolt)
+		# A blunt nub replaces the tapered shaft and keeps the local datum.
+		discard_visual(bolt)
+		attach_visual(bolt, make_bolt_visual(bolt))
 	else:
 		discard_visual(bolt)
 		bolt.group_id = 0
@@ -407,7 +424,7 @@ func installed_count() -> int:
 		count += group.bolts.size()
 	return count
 
-func make_bolt_visual(bolt: InstalledFastener) -> Node3D:
+func make_bolt_visual(bolt: InstalledFastener, length_override := 0.0) -> Node3D:
 	var visual := Node3D.new()
 	visual.name = "Bolt_%d" % bolt.id
 	make_cylinder(visual, 0.010, 0.005, 0.0035, 6, bolt.grade.finish)
@@ -421,14 +438,19 @@ func make_bolt_visual(bolt: InstalledFastener) -> Node3D:
 	ring.mesh = mesh
 	ring.material_override = bolt.grade.accent
 	ring.rotation.x = PI * 0.5
-	ring.position.z = 0.008
+	ring.position.z = HEAD_FACE_OFFSET
 	visual.add_child(ring)
-	make_cylinder(visual, 0.00635, REACH - 0.006, -0.073, 8, bolt.grade.finish)
-	make_cylinder(visual, 0.004, 0.006, -0.149, 8, bolt.grade.finish, 0.0)
+	var length := length_override if length_override > 0.0 else bolt.visual_length
+	if bolt.state == InstalledFastener.State.FAILED:
+		make_cylinder(visual, 0.00635, SHEARED_LENGTH, -SHEARED_LENGTH * 0.5, 8, bolt.grade.finish).name = "ShearedNub"
+	else:
+		var shaft_length := length - TIP_LENGTH
+		make_cylinder(visual, 0.00635, shaft_length, -shaft_length * 0.5, 8, bolt.grade.finish).name = "Shaft"
+		make_cylinder(visual, 0.00635, TIP_LENGTH, -length + TIP_LENGTH * 0.5, 8, bolt.grade.finish, 0.002).name = "Tip"
 	return visual
 
 func make_cylinder(parent: Node3D, radius: float, length: float, z: float, sides: int,
-		material: Material, bottom := -1.0) -> void:
+		material: Material, bottom := -1.0) -> MeshInstance3D:
 	var instance := MeshInstance3D.new()
 	var mesh := CylinderMesh.new()
 	mesh.top_radius = radius
@@ -441,6 +463,7 @@ func make_cylinder(parent: Node3D, radius: float, length: float, z: float, sides
 	instance.rotation.x = PI * 0.5
 	instance.position.z = z
 	parent.add_child(instance)
+	return instance
 
 func rebuild() -> void:
 	var velocities := {}

@@ -102,8 +102,8 @@ Press **E** at the administrative CRT and open **Settings**. Controls lists
 bindings and live sensitivity and rotation options. Mechanics holds the
 installation settings below. Visuals includes CRT text brightness and
 **Fastener Visual Scale (%)**, from 75% to 250% in 5% steps, defaulting to 100%.
-It applies immediately to installed heads, shanks, remnants and their selection
-targets. Development contains diagnostics and JSON controls. **Save** persists
+It applies immediately to the diameter of installed heads, shanks, and remnants, and to their selection
+targets. Shaft length follows the measured material stack. Development contains diagnostics and JSON controls. **Save** persists
 the profile in `user://mechanical_interaction_settings.json`. **Reset Defaults**
 restores live defaults. Save afterward to keep the reset on restart.
 

@@ -12,6 +12,7 @@ var local_b: Vector3
 var local_orientation: Basis
 var state := State.RECOVERED
 var load_estimate := 0.0
+var visual_length := 0.0
 var visual: Node3D
 
 func recoverable() -> bool:

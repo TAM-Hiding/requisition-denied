@@ -3,7 +3,7 @@ extends InteractableObject
 
 const CAPACITY := 20
 const RANGE := 3.0
-const SIGHT_HEIGHT := 0.089
+const REAR_SIGHT_TIP := Vector3(0, 0.105, 0.115)
 const GRADES: Array[FastenerGrade] = [
 	preload("res://data/fasteners/standard.tres"),
 	preload("res://data/fasteners/grade_8.tres"),
