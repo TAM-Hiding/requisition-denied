@@ -474,11 +474,23 @@ func build_fastening_station(crate: InteractableObject, dark: Material, amber: M
 	var base := box(test_ram, "RamBase", Vector3(0.7, 1.0, 0.73), Vector3(-0.53, -0.18, 0), dark, true)
 	base.set_meta(&"no_fasteners", true)
 	box(base, "HazardMark", Vector3(0.58, 0.06, 0.74), Vector3(0, 0.21, 0), amber)
-	box(test_ram, "RodGuide", Vector3(0.5, 0.22, 0.22), Vector3(-0.38, 0, 0), steel)
+	var guide := box(test_ram, "RodGuide", Vector3(0.5, 0.22, 0.22), Vector3(-0.38, 0, 0), steel, true) as StaticBody3D
+	guide.collision_layer = StructuralTestRam.PLAYER_SOLID_LAYER
+	guide.collision_mask = 0
+	test_ram.shaft_guard = StaticBody3D.new()
+	test_ram.shaft_guard.name = "RamShaftGuard"
+	test_ram.shaft_guard.collision_layer = StructuralTestRam.PLAYER_SOLID_LAYER
+	test_ram.shaft_guard.collision_mask = 0
+	test_ram.add_child(test_ram.shaft_guard)
+	var shaft_collision := CollisionShape3D.new()
+	test_ram.shaft_shape = BoxShape3D.new()
+	test_ram.shaft_shape.size = Vector3(0.1, 0.176, 0.176)
+	shaft_collision.shape = test_ram.shaft_shape
+	test_ram.shaft_guard.add_child(shaft_collision)
 	var face := AnimatableBody3D.new()
 	face.name = "RamFace"
 	face.sync_to_physics = false
-	face.collision_layer = 0
+	face.collision_layer = StructuralTestRam.PLAYER_SOLID_LAYER
 	face.collision_mask = 1 | 2
 	test_ram.add_child(face)
 	add_shape(face, Vector3(0.105, 0.42, 0.57), Vector3.ZERO)

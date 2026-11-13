@@ -47,6 +47,8 @@ func run() -> void:
 	await pose_and_gusset()
 	await invalidated_edge()
 	await rig()
+	await blocked_ram_recalculation()
+	await ram_player_collision()
 	facility.queue_free()
 	await process_frame
 	print("RD-008: %d checks, %d failures" % [checks, failures])
@@ -875,3 +877,97 @@ func fasten_held_at_ram(workpiece: InteractableObject, ram: StructuralTestRam) -
 	check(result.begins_with("INSTALLED") and not actor.placement.is_active()
 		and ram.drive == StructuralTestRam.Drive.EXTEND, "Successful live shot releases the grab: " + result)
 	return fastener if fastener.state == InstalledFastener.State.INSTALLED else null
+
+func blocked_ram_recalculation() -> void:
+	var ram := facility.test_ram as StructuralTestRam
+	var crate := facility.get_node("Crate") as InteractableObject
+	# The crate cannot advance: the plate touches its left face and a solid
+	# stop touches the right face. Both stay in place when the drive is stopped.
+	crate.global_transform = Transform3D(Basis.IDENTITY, Vector3(-2.5, 0.65, -0.5))
+	crate.linear_velocity = Vector3.ZERO
+	var stop := wall("CrateHardStop", Vector3(-1.80, 0.72, -0.5), Vector3(0.10, 1.35, 1.30))
+	var side := piece("StalledSide", Vector3(-2.45, 0.72, 0.183), Vector3(0.34, 0.26, 0.04), 12.0)
+	var extra := piece("StalledExtension", Vector3(-2.45, 0.72, 0.226), Vector3(0.22, 0.20, 0.04), 8.0)
+	extra.position.z += 0.25
+	actor.global_position = Vector3(-2.45, 0.02, 1.75)
+	ram.travel = 1.797
+	ram.face.position.x = ram.travel
+	ram.set_force_index(9)
+	await frames(5)
+	system.load_debug = true
+	var stopped_bolt := fasten_held_at_ram_state(side, ram, StructuralTestRam.Drive.IDLE)
+	check(stopped_bolt != null and ram.actual_load == 0, "Stopped contact permits fastening without hydraulic load")
+	if stopped_bolt != null:
+		print("RAM COMPARISON stopped=", ram.actual_load, " side load=", stopped_bolt.load_estimate,
+			" rating=", stopped_bolt.grade.strength, " group=", stopped_bolt.group_id)
+	ram.set_drive(StructuralTestRam.Drive.EXTEND)
+	await frames(4)
+	if stopped_bolt != null:
+		print("RAM COMPARISON powered=", ram.actual_load, " stalled=", ram.stalled,
+			" side load=", stopped_bolt.load_estimate, " rating=", stopped_bolt.grade.strength,
+			" group=", stopped_bolt.group_id, " state=", stopped_bolt.state)
+	check(stopped_bolt != null and stopped_bolt.state == InstalledFastener.State.INSTALLED and ram.stalled
+		and ram.actual_load > 0, "Reactivation loads the hard stop without breaking the side bracket")
+	if stopped_bolt != null and stopped_bolt.state == InstalledFastener.State.INSTALLED:
+		extra.global_position = side.global_position + Vector3.BACK * 0.043
+		extra.linear_velocity = Vector3.ZERO
+		await frames(2)
+		var extension_bolt := fasten_held_at_ram_state(extra, ram, StructuralTestRam.Drive.EXTEND)
+		await frames(3)
+		check(extension_bolt != null and extension_bolt.state == InstalledFastener.State.INSTALLED
+			and stopped_bolt.state == InstalledFastener.State.INSTALLED,
+			"Powered topology change preserves both side connections against the hard stop")
+		if extension_bolt != null:
+			system.remove(extension_bolt)
+		system.remove(stopped_bolt)
+	ram.set_drive(StructuralTestRam.Drive.IDLE)
+	system.load_debug = false
+	actor.placement.cancel()
+	for node in [extra, side, stop]:
+		node.queue_free()
+	await frames(2)
+
+func fasten_held_at_ram_state(workpiece: InteractableObject, ram: StructuralTestRam,
+		expected_drive: StructuralTestRam.Drive) -> InstalledFastener:
+	actor.camera.look_at(workpiece.global_position)
+	if not actor.placement.begin_world(workpiece):
+		return null
+	actor.set_tool_aiming(true)
+	tool.removing = false
+	var fastener := tool.rounds.back() as InstalledFastener
+	var result := tool.use(actor.camera, actor)
+	actor.set_tool_aiming(false)
+	check(result.begins_with("INSTALLED") and not actor.placement.is_active()
+		and ram.drive == expected_drive, "Shot installs and hands off in requested ram state: " + result)
+	return fastener if fastener.state == InstalledFastener.State.INSTALLED else null
+
+
+func ram_player_collision() -> void:
+	var ram := facility.test_ram as StructuralTestRam
+	var crate := facility.get_node("Crate") as InteractableObject
+	crate.global_position = Vector3(-2.5, 0.65, 2.3)
+	crate.linear_velocity = Vector3.ZERO
+	ram.travel = 2.2
+	ram.face.position.x = ram.travel
+	ram.set_drive(StructuralTestRam.Drive.IDLE)
+	await frames(3)
+	for sample in [[-5.48, "RamBase"], [-3.78, "RamShaftGuard"], [-2.78, "RamFace"]]:
+		var result := KinematicCollision3D.new()
+		var start := Transform3D(Basis.IDENTITY, Vector3(sample[0], 0.025, -1.45))
+		check(actor.test_move(start, Vector3.BACK * 1.4, result)
+			and is_instance_valid(result.get_collider()) and String(result.get_collider().name) == sample[1],
+			"Otis collides with " + sample[1])
+	actor.global_position = Vector3(-2.31, 0.025, -0.5)
+	await frames(3)
+	var before := actor.global_position
+	ram.set_drive(StructuralTestRam.Drive.EXTEND)
+	await frames(42)
+	check(ram.stalled and ram.actual_load == 0 and absf(actor.global_position.x - before.x) < 0.005
+		and ram.face.global_position.x < before.x - 0.34,
+		"Moving plate stalls before Otis and does not push him")
+	actor.global_position = Vector3(1.0, 0.025, 2.0)
+	var blocked_stroke := ram.travel
+	await frames(15)
+	check(ram.travel > blocked_stroke + 0.04 and is_equal_approx(ram.shaft_shape.size.x, ram.travel + 0.0975),
+		"Clearing Otis resumes motion and shaft collision tracks the plate")
+	ram.set_drive(StructuralTestRam.Drive.IDLE)

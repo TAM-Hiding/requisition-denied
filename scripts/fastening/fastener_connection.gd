@@ -4,6 +4,7 @@ extends MechanicalConnection
 var a: PhysicsBody3D
 var b: PhysicsBody3D
 var id: int
+var created_revision: int
 var bolts: Array[InstalledFastener] = []
 
 func other(body: PhysicsBody3D) -> PhysicsBody3D:

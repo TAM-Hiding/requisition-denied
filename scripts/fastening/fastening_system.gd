@@ -15,6 +15,8 @@ var connections: Array[FastenerConnection] = []
 var failed: Array[InstalledFastener] = []
 var last_failed_group := 0
 var last_load := 0.0
+var load_debug := false
+var topology_revision := 0
 var visual_scale := 1.0
 var _next_bolt := 1
 var _issued := {}
@@ -194,6 +196,7 @@ func install(bolt: InstalledFastener, origin: Vector3, direction: Vector3, reach
 		group.a = a
 		group.b = b
 		group.id = _next_group
+		group.created_revision = topology_revision + 1
 		_next_group += 1
 	bolt.a = a
 	bolt.b = b
@@ -372,13 +375,13 @@ func physics_root(body: PhysicsBody3D) -> PhysicsBody3D:
 func incident(body: PhysicsBody3D) -> Array[FastenerConnection]:
 	return connections.filter(func(edge: FastenerConnection) -> bool: return edge.a == body or edge.b == body)
 
-func route(body: PhysicsBody3D) -> Array[FastenerConnection]:
+func route(body: PhysicsBody3D, contact_support: PhysicsBody3D = null) -> Array[FastenerConnection]:
 	# A full reaction exists only along a path to a fixed support.
 	var queue: Array[PhysicsBody3D] = [body]
 	var paths := {body: []}
 	while not queue.is_empty():
 		var current: PhysicsBody3D = queue.pop_front()
-		if current != body and anchored(current):
+		if current != body and (current == contact_support or (contact_support == null and anchored(current))):
 			var path: Array[FastenerConnection] = []
 			path.assign(paths[current])
 			return path
@@ -390,7 +393,7 @@ func route(body: PhysicsBody3D) -> Array[FastenerConnection]:
 	return []
 
 func apply_structural_load(body: PhysicsBody3D, point: Vector3, force: Vector3,
-		ram_contact := false) -> void:
+		ram_contact := false, contact_support: PhysicsBody3D = null) -> void:
 	if not is_instance_valid(body) or not point.is_finite() or not force.is_finite():
 		return
 	reconcile()
@@ -400,10 +403,18 @@ func apply_structural_load(body: PhysicsBody3D, point: Vector3, force: Vector3,
 	# Re-route after a complete break, without loading unrelated branches of
 	# a now-separated island. Each bolt can fail at most once per call.
 	var failures_before := failed.size()
-	var path := route(body)
+	var path := route(body, contact_support)
+	var source := "EXPLICIT LOAD"
+	if ram_contact:
+		source = "RAM SUPPORT PATH" if contact_support == null else "RAM CONTACT REACTION"
+		if load_debug:
+			print("RAM LOAD revision=", topology_revision, " driven=", body.name,
+				" contact support=", contact_support, " force=", force, " route=", path.map(
+					func(edge: FastenerConnection) -> int: return edge.id))
 	if path.is_empty():
 		if ram_contact:
-			apply_ram_inertia(body, force)
+			if contact_support == null:
+				apply_ram_inertia(body, force)
 			return
 		path = incident(body)
 	while not path.is_empty():
@@ -411,27 +422,34 @@ func apply_structural_load(body: PhysicsBody3D, point: Vector3, force: Vector3,
 		if processed.has(group):
 			continue
 		processed.append(group)
-		if overload_group(group, point, force):
+		if overload_group(group, point, force, source):
 			changed = true
 			# Once the support path breaks, only another live support can
 			# carry this same reaction. Free motion is evaluated separately.
-			path = route(body)
+			path = route(body, contact_support)
 	if changed:
 		rebuild()
 	report_failures(failures_before)
 
-func overload_group(group: FastenerConnection, point: Vector3, force: Vector3) -> bool:
+func overload_group(group: FastenerConnection, point: Vector3, force: Vector3, source: String) -> bool:
 	while not group.bolts.is_empty():
 		group.estimate(point, force)
 		var weakest: InstalledFastener = null
 		var worst_ratio := 1.0
 		for bolt in group.bolts:
 			var ratio := bolt.load_estimate / bolt.grade.strength
+			if load_debug:
+				print("STRUCTURAL LOAD ", source, " revision=", topology_revision, " group=", group.id,
+					" created=", group.created_revision, " bodies=", group.a.name, "/", group.b.name,
+					" bolt=", bolt.id, " load=", bolt.load_estimate, " rating=", bolt.grade.strength)
 			if ratio > worst_ratio:
 				weakest = bolt
 				worst_ratio = ratio
 		if weakest == null:
 			return false
+		weakest.failure_source = source
+		if load_debug:
+			print("STRUCTURAL FAILURE group=", group.id, " bolt=", weakest.id, " reason=load exceeds rating")
 		unlink(group, weakest, true)
 	return true
 
@@ -456,7 +474,7 @@ func apply_ram_inertia(body: PhysicsBody3D, force: Vector3) -> void:
 			visited[next] = true
 			if branch.is_empty():
 				continue
-			if overload_group(group, branch.center, force * (float(branch.mass) / root.mass)):
+			if overload_group(group, branch.center, force * (float(branch.mass) / root.mass), "RAM INERTIA"):
 				topology_changed = true
 			else:
 				queue.append(next)
@@ -537,6 +555,7 @@ func make_cylinder(parent: Node3D, radius: float, length: float, z: float, sides
 	return instance
 
 func rebuild() -> void:
+	topology_revision += 1
 	var velocities := {}
 	for body in _roots:
 		var old: PhysicsBody3D = _roots[body]

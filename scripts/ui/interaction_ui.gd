@@ -250,6 +250,7 @@ func _input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed("debug_overlay"):
 		debug_visible = not debug_visible
+		get_parent().fastening.load_debug = debug_visible
 		apply_mechanical_settings()
 		debug_label.visible = debug_visible
 		get_viewport().set_input_as_handled()
@@ -486,5 +487,5 @@ func apply_mechanical_settings() -> void:
 
 
 func show_bolt_failure(bolt: InstalledFastener) -> void:
-	show_feedback("BOLT #%d FAILED UNDER LOAD · %.0f / %.0f" % [
-		bolt.id, bolt.load_estimate, bolt.grade.strength])
+	show_feedback("BOLT #%d FAILED UNDER LOAD · GROUP #%d · %s · %.0f / %.0f" % [
+		bolt.id, bolt.group_id, bolt.failure_source, bolt.load_estimate, bolt.grade.strength])
