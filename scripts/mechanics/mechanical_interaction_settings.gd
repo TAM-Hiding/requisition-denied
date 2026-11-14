@@ -6,7 +6,9 @@ signal changed
 const FILE_PATH := "user://mechanical_interaction_settings.json"
 const VERSION := 1
 const VISUAL_SCALE_KEY := "fastener_visual_scale_percent"
+const REMOVAL_OPTIONS := ["Toggle", "Timed", "Hold"]
 const CONTROL_LIMITS := {
+	"removal_seconds": Vector2(1, 30),
 	"mouse_sensitivity": Vector2(0.0005, 0.01),
 	"precision_rotation_sensitivity": Vector2(0.001, 0.03),
 	"ads_sensitivity_multiplier": Vector2(0.25, 2.0),
@@ -22,6 +24,8 @@ const DEFAULTS := {
 	"schema_version": VERSION,
 	"fastener_visual_scale_percent": 100,
 	"controls": {
+		"removal_behavior": "Timed",
+		"removal_seconds": 5.0,
 		"mouse_sensitivity": 0.0025,
 		"precision_rotation_sensitivity": 0.009,
 		"ads_sensitivity_multiplier": 0.75,
@@ -93,6 +97,10 @@ func apply(candidate: Variant) -> String:
 		if not numeric_in_range(value, snappedf(bounds.x, 0.00001), snappedf(bounds.y, 0.00001)):
 			return "%s is out of range." % key
 		validated.controls[key] = value
+	var behavior: Variant = controls.get("removal_behavior", DEFAULTS.controls.removal_behavior)
+	if behavior not in REMOVAL_OPTIONS:
+		return "Unknown Uni-Bolt removal behavior."
+	validated.controls.removal_behavior = behavior
 	values = validated
 	changed.emit()
 	return ""

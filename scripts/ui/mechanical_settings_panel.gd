@@ -16,10 +16,13 @@ const CONTROL_LABELS := {
 	"precision_rotation_sensitivity": "Precision rotation sensitivity",
 	"ads_sensitivity_multiplier": "ADS sensitivity multiplier",
 }
-const CONTROL_REFERENCE := "WASD Move   ·   E Context   ·   Hold G Manipulate\nG Place   ·   1 Equip / stow tool   ·   X Drop Uni-Bolt\nLMB Operate tool   ·   Hold RMB Aim   ·   R Mode\nMiddle mouse Rotate   ·   Wheel Adjust range   ·   Esc Exit"
-const DEVELOPMENT_REFERENCE := "F3 Diagnostics\nF5 Ram drive   ·   F6 / Shift+F6 Adjust force   ·   F7 Reset\nF8 Cycle grade   ·   F9 Refill test ammunition"
+const CONTROL_REFERENCE := "WASD Move   ·   E Context   ·   Hold G Manipulate\nG Place   ·   1 Equip / stow tool   ·   X Drop Uni-Bolt\nLMB Operate tool   ·   Hold RMB Aim   ·   R Removal   ·   V Grade   ·   B Refill\nMiddle mouse Rotate   ·   Wheel Adjust range   ·   Esc Exit"
+const DEVELOPMENT_REFERENCE := "F3 Diagnostics\nF5 Ram drive   ·   F6 / Shift+F6 Adjust force   ·   F7 Reset\nV Cycle grade   ·   B Refill test ammunition"
 
 var settings: MechanicalInteractionSettings
+var scrap_supply: ScrapSupply
+var removal_choice := OptionButton.new()
+var cleanup_pending := false
 var pages: Array[ScrollContainer] = []
 var tabs := HBoxContainer.new()
 var fields := {}
@@ -57,6 +60,19 @@ func _ready() -> void:
 		add_number(controls, "controls", key, CONTROL_LABELS[key], MechanicalInteractionSettings.CONTROL_LIMITS[key], 0.05 if key == "ads_sensitivity_multiplier" else 0.0001)
 	add_toggle(controls, "rotation", "invert_horizontal", "Invert horizontal rotation")
 	add_toggle(controls, "rotation", "invert_vertical", "Invert vertical rotation")
+	var removal_row := HBoxContainer.new()
+	controls.add_child(removal_row)
+	var removal_label := Label.new()
+	removal_label.text = "Uni-Bolt Removal Behavior"
+	removal_label.size_flags_horizontal = SIZE_EXPAND_FILL
+	removal_row.add_child(removal_label)
+	for behavior: String in MechanicalInteractionSettings.REMOVAL_OPTIONS:
+		removal_choice.add_item(behavior)
+	removal_row.add_child(removal_choice)
+	removal_choice.item_selected.connect(func(index: int) -> void:
+		update_field("controls", "removal_behavior", MechanicalInteractionSettings.REMOVAL_OPTIONS[index]))
+	add_number(controls, "controls", "removal_seconds", "Timed removal (s)",
+		MechanicalInteractionSettings.CONTROL_LIMITS.removal_seconds, 1.0)
 	add_text(controls, CONTROL_REFERENCE)
 
 	var mechanics := page(1)
@@ -87,6 +103,11 @@ func _ready() -> void:
 	add_button(import_row, "BROWSE", func() -> void: browse_requested.emit())
 	add_button(import_row, "IMPORT JSON", func() -> void: import_snapshot(import_path.text))
 
+	var cleanup_row := HBoxContainer.new()
+	development.add_child(cleanup_row)
+	add_button(cleanup_row, "CLEAR LOOSE SCRAP", request_cleanup)
+	add_button(cleanup_row, "CANCEL CLEANUP", cancel_cleanup)
+
 	message.add_theme_font_size_override("font_size", 17)
 	message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	add_child(message)
@@ -103,6 +124,7 @@ func page(index: int) -> VBoxContainer:
 	return column
 
 func show_settings(index: int) -> void:
+	cleanup_pending = false
 	section_index = index
 	for i in pages.size():
 		pages[i].visible = i == index
@@ -145,6 +167,7 @@ func add_button(parent: Container, caption: String, callback: Callable) -> void:
 	button.pressed.connect(callback)
 
 func refresh() -> void:
+	removal_choice.select(MechanicalInteractionSettings.REMOVAL_OPTIONS.find(settings.values.controls.removal_behavior))
 	for key: String in fields:
 		var entry: Array = fields[key]
 		var source: Dictionary = settings.values if entry[0].is_empty() else settings.values[entry[0]]
@@ -182,3 +205,17 @@ func import_snapshot(path: String) -> void:
 	import_path.text = path.strip_edges()
 	var issue := settings.load_file(import_path.text)
 	message.text = "Snapshot applied. Save to keep it after restart." if issue.is_empty() else issue
+
+func request_cleanup() -> void:
+	if not is_instance_valid(scrap_supply):
+		return
+	if not cleanup_pending:
+		cleanup_pending = true
+		message.text = "Press Clear Loose Scrap again to remove loose dispensed stock."
+		return
+	cleanup_pending = false
+	message.text = "Cleared %d loose scrap parts." % scrap_supply.clear_loose()
+
+func cancel_cleanup() -> void:
+	cleanup_pending = false
+	message.text = "Cleanup canceled."

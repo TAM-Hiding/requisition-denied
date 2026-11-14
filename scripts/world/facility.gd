@@ -12,6 +12,8 @@ var barrier_control: BarrierController
 var administration: AdministrativeSession
 var terminal_session: TerminalInteraction
 var ram_session: TerminalInteraction
+var scrap_session: TerminalInteraction
+var scrap_supply: ScrapSupply
 var _barrier_was_blocked := false
 
 
@@ -82,6 +84,7 @@ func _ready() -> void:
 	label_at(crate, "STORAGE\n001", Vector3(0, 0, 0.66), 26)
 	build_load_station(floor as StaticBody3D, dark, amber, steel)
 	build_fastening_station(crate, dark, amber, steel)
+	build_scrap_rack(dark, amber, steel)
 
 func build_machinery(floor: StaticBody3D, dark: Material, amber: Material) -> void:
 	var foundation := MechanicalAssembly.new()
@@ -388,7 +391,7 @@ func build_fastening_station(crate: InteractableObject, dark: Material, amber: M
 	bolt_tool.system = fastening
 	bolt_tool.definition = part_definition(&"RD-UNI-BOLT", "Uni-Bolt™ installation tool", 3.0)
 	bolt_tool.definition.mobility = ObjectDefinition.Mobility.CARRYABLE
-	bolt_tool.definition.description = "An industrial two-mode fastening tool. R switches modes. Hold RMB for sighting."
+	bolt_tool.definition.description = "An industrial two-mode fastening tool. R controls removal mode. Hold RMB for sighting."
 	bolt_tool.position = Vector3(-0.85, 0.14, 1.85)
 	add_child(bolt_tool)
 	box(bolt_tool, "Housing", Vector3(0.15, 0.115, 0.23), Vector3(0, 0.04, 0.045), dark)
@@ -409,6 +412,8 @@ func build_fastening_station(crate: InteractableObject, dark: Material, amber: M
 	tool_profile.lateral_clearance_limit = 0.0
 	tool_profile.anticipation_margin = 0.025
 	bolt_tool.definition.held_profile = tool_profile
+	var controls: Dictionary = $Otis.placement.mechanical_settings.values.controls
+	bolt_tool.configure_removal(controls.removal_behavior, controls.removal_seconds)
 	bolt_tool.replenish()
 
 	var plate := stock_piece(&"RD-STOCK-PLATE", "Steel plate", 4.0,
@@ -587,3 +592,52 @@ func stock_piece(id: StringName, title: String, kilograms: float, at: Vector3,
 	add_shape(piece, size, Vector3.ZERO)
 	piece.get_child(piece.get_child_count() - 1).name = "CollisionShape3D"
 	return piece
+
+func build_scrap_rack(dark: Material, amber: Material, steel: Material) -> void:
+	scrap_supply = ScrapSupply.new()
+	scrap_supply.name = "ScrapSupply"
+	scrap_supply.finish = steel
+	add_child(scrap_supply)
+	var rack := InteractableObject.new()
+	rack.name = "DevelopmentScrapRack"
+	rack.position = Vector3(-4.80, 1.22, 5.76)
+	rack.rotation.y = PI
+	rack.definition = part_definition(&"RD-SCRAP-RACK", "Development scrap rack", 80.0)
+	rack.definition.mobility = ObjectDefinition.Mobility.FIXED
+	rack.definition.description = "Unlimited rigid steel test stock. Collect deliveries from the marked floor pad."
+	rack.definition.available_actions.assign([&"inspect", &"use_terminal"])
+	rack.set_meta(&"no_fasteners", true)
+	add_child(rack)
+	box(rack, "Housing", Vector3(1.58, 0.86, 0.30), Vector3.ZERO, dark)
+	add_shape(rack, Vector3(1.58, 0.86, 0.30), Vector3.ZERO)
+	for x in [-0.67, 0.67]:
+		box(rack, "Upright", Vector3(0.12, 0.85, 0.18), Vector3(x, -0.795, 0), steel)
+		add_shape(rack, Vector3(0.12, 0.85, 0.18), Vector3(x, -0.795, 0))
+	box(rack, "SafetyLip", Vector3(1.58, 0.05, 0.31), Vector3(0, -0.43, 0), amber)
+	for end in [-1, 1]:
+		box(self, "ScrapPadStripe", Vector3(1.64, 0.004, 0.035),
+			Vector3(scrap_supply.delivery.x, 0.009, scrap_supply.delivery.z + end * 0.31), amber)
+	var display := SubViewport.new()
+	display.disable_3d = true
+	display.size = Vector2i(800, 490)
+	display.render_target_update_mode = SubViewport.UPDATE_WHEN_VISIBLE
+	rack.add_child(display)
+	var screen := MeshInstance3D.new()
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.92, 0.57)
+	screen.mesh = quad
+	var glass := StandardMaterial3D.new()
+	glass.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glass.albedo_texture = display.get_texture()
+	screen.material_override = glass
+	screen.position.z = 0.155
+	rack.add_child(screen)
+	var anchor := Marker3D.new()
+	anchor.position.z = 1.29
+	rack.add_child(anchor)
+	scrap_session = TerminalInteraction.new()
+	scrap_session.name = "ScrapRackInteraction"
+	add_child(scrap_session)
+	scrap_session.configure_scrap($Otis, rack, scrap_supply, screen, anchor, display)
+	scrap_session.active_changed.connect($InteractionUI.set_terminal_active)
+	terminal_session.screen_ui.settings_panel.scrap_supply = scrap_supply
