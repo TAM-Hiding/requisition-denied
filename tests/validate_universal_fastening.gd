@@ -391,6 +391,7 @@ func action(name: StringName, pressed := true) -> InputEventAction:
 	return event
 
 func repeated_construction() -> void:
+	tool.configure_removal("Toggle", 5.0)
 	var ui := facility.get_node("InteractionUI")
 	var placement := actor.placement
 	var backing := piece("CycleBacking", Vector3(3.3, 1.4, 4.65), Vector3(0.70, 0.70, 0.20), 8.0)

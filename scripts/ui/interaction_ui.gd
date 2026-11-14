@@ -116,14 +116,16 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _physics_process(delta: float) -> void:
+	var tool := otis.equipped_tool()
+	if tool != null:
+		tool.update_removal(delta, gameplay_input_allowed())
 	if not application_focused or active_station() != null:
 		return
-	var tool := otis.equipped_tool()
 	var ram: StructuralTestRam = get_parent().test_ram
 	var aim := {}
 	if tool != null and gameplay_input_allowed():
 		aim = tool.aim_feedback(otis.camera, otis)
-		tool_readout.text = tool.hud_text() + "\nLMB Use  •  RMB Aim  •  R Mode  •  F8 Grade  •  F9 Refill"
+		tool_readout.text = tool.hud_text() + "\nLMB Use  •  RMB Aim  •  R Mode  •  V Grade  •  B Refill"
 		var guidance: String = aim.issue
 		if guidance.is_empty():
 			guidance = "REMOVE BOLT #%d" % aim.bolt.id if tool.removing else "INSTALL UNI-BOLT"
@@ -322,10 +324,12 @@ func handle_fastening_input(event: InputEvent) -> bool:
 	var tool := otis.equipped_tool()
 	if event.is_action_pressed("equip_first") and tool != null:
 		otis.set_tool_aiming(false)
+		tool.update_removal(0.0, false)
 		otis.equipment.stow()
 		return true
 	if event.is_action_pressed("drop_tool") and tool != null:
 		otis.set_tool_aiming(false)
+		tool.update_removal(0.0, false)
 		otis.equipment.drop()
 		return true
 	if otis.placement.is_grabbing() and event.is_action_pressed("equip_first"):
@@ -347,12 +351,9 @@ func handle_fastening_input(event: InputEvent) -> bool:
 			show_feedback("Finish the current mechanical operation first.")
 	elif event.is_action_pressed("tool_secondary_aim"):
 		otis.set_tool_aiming(true)
-	elif event.is_action_pressed("tool_mode_toggle"):
-		tool.removing = not tool.removing
+	elif event.is_action("tool_mode_toggle"):
+		tool.removal_input(event.is_action_pressed("tool_mode_toggle"))
 		show_feedback("UNI-BOLT · REMOVE" if tool.removing else "UNI-BOLT · INSTALL")
-		var color := Color("e4b968") if tool.removing else Color("83d6a8")
-		tool.indicator.albedo_color = color
-		tool.indicator.emission = color
 	elif event.is_action_pressed("tool_grade"):
 		tool.load_grade(tool.grade_index + 1)
 	elif event.is_action_pressed("tool_replenish"):
@@ -362,19 +363,21 @@ func handle_fastening_input(event: InputEvent) -> bool:
 	return true
 
 func set_terminal_active(active: bool) -> void:
+	if active:
+		suspend_tool_input()
 	cancel_hold()
 	otis.set_tool_aiming(false)
 	otis.equipment.presentation.set_station_active(active)
 	hud.visible = not active
 
 func active_station() -> TerminalInteraction:
-	for station: TerminalInteraction in [get_parent().terminal_session, get_parent().ram_session]:
+	for station: TerminalInteraction in [get_parent().terminal_session, get_parent().ram_session, get_parent().scrap_session]:
 		if is_instance_valid(station) and station.active:
 			return station
 	return null
 
 func station_for(object: InteractableObject) -> TerminalInteraction:
-	for station: TerminalInteraction in [get_parent().terminal_session, get_parent().ram_session]:
+	for station: TerminalInteraction in [get_parent().terminal_session, get_parent().ram_session, get_parent().scrap_session]:
 		if is_instance_valid(station) and station.is_target(object):
 			return station
 	return null
@@ -459,6 +462,7 @@ func close_menu() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and application_focused:
 		application_focused = false
+		suspend_tool_input()
 		_mouse_mode_before_focus_loss = Input.mouse_mode
 		if is_instance_valid(otis) and is_instance_valid(otis.equipment):
 			otis.set_tool_aiming(false)
@@ -481,6 +485,9 @@ func apply_mechanical_settings() -> void:
 	otis.mouse_sensitivity = values.controls.mouse_sensitivity
 	otis.placement.rotation_sensitivity = values.controls.precision_rotation_sensitivity
 	otis.tool_aim_sensitivity = values.controls.ads_sensitivity_multiplier
+	var tool := get_parent().bolt_tool as FasteningTool
+	if is_instance_valid(tool):
+		tool.configure_removal(values.controls.removal_behavior, values.controls.removal_seconds)
 	var fastening: FasteningSystem = get_parent().fastening
 	if is_instance_valid(fastening):
 		fastening.set_visual_scale_percent(values[MechanicalInteractionSettings.VISUAL_SCALE_KEY])
@@ -489,3 +496,10 @@ func apply_mechanical_settings() -> void:
 func show_bolt_failure(bolt: InstalledFastener) -> void:
 	show_feedback("BOLT #%d FAILED UNDER LOAD · GROUP #%d · %s · %.0f / %.0f" % [
 		bolt.id, bolt.group_id, bolt.failure_source, bolt.load_estimate, bolt.grade.strength])
+
+
+func suspend_tool_input() -> void:
+	if is_instance_valid(otis) and is_instance_valid(otis.equipment):
+		var tool := otis.equipped_tool()
+		if tool != null:
+			tool.update_removal(0.0, false)
