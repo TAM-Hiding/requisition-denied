@@ -2,12 +2,16 @@ extends Node3D
 ## Primitive-only room. Collision follows the same dimensions as presentation.
 const PLATE_CENTER := Vector3(2.7, 0, 1.4)
 const PLATE_WIDTH := 2.1
+var fastening: FasteningSystem
+var bolt_tool: FasteningTool
+var test_ram: StructuralTestRam
 var generator: MechanicalComponent
 var load_plate: PhysicalLoadSensor
 var barrier: PoweredBarrier
 var barrier_control: BarrierController
 var administration: AdministrativeSession
 var terminal_session: TerminalInteraction
+var ram_session: TerminalInteraction
 var _barrier_was_blocked := false
 
 
@@ -53,7 +57,7 @@ func _ready() -> void:
 	add_child(environment)
 	var crate := make_object("crate", Vector3(-2.5, 0.65, -0.5), Vector3(1.3, 1.3, 1.3), material(Color("986a43")))
 	for y in [-0.48, 0.48]:
-		box(crate, "CrateBand", Vector3(1.34, 0.1, 1.34), Vector3(0, y, 0), dark)
+		box(crate, "CrateBand", Vector3(1.34 if y > 0 else 1.01, 0.1, 1.34), Vector3(0, y, 0), dark)
 	build_machinery(floor as StaticBody3D, dark, amber)
 	var wrench := make_object("wrench", Vector3(1.0, 0.043, -1.25), Vector3(0.11, 0.08, 0.35), dark)
 	wrench.get_node("Model").queue_free()
@@ -77,6 +81,7 @@ func _ready() -> void:
 	label_at(self, "RD / 001   •   SYSTEMS TEST CHAMBER", Vector3(0, 3.05, -5.96), 42)
 	label_at(crate, "STORAGE\n001", Vector3(0, 0, 0.66), 26)
 	build_load_station(floor as StaticBody3D, dark, amber, steel)
+	build_fastening_station(crate, dark, amber, steel)
 
 func build_machinery(floor: StaticBody3D, dark: Material, amber: Material) -> void:
 	var foundation := MechanicalAssembly.new()
@@ -370,3 +375,215 @@ func label_at(parent: Node3D, text: String, at: Vector3, size: int, color: Color
 	label.pixel_size = 0.004
 	label.modulate = color
 	parent.add_child(label)
+
+
+func build_fastening_station(crate: InteractableObject, dark: Material, amber: Material, steel: Material) -> void:
+	fastening = FasteningSystem.new()
+	fastening.name = "FasteningSystem"
+	add_child(fastening)
+	fastening.bolt_failed.connect($InteractionUI.show_bolt_failure)
+	fastening.set_visual_scale_percent($Otis.placement.mechanical_settings.values[MechanicalInteractionSettings.VISUAL_SCALE_KEY])
+	bolt_tool = FasteningTool.new()
+	bolt_tool.name = "UniBoltTool"
+	bolt_tool.system = fastening
+	bolt_tool.definition = part_definition(&"RD-UNI-BOLT", "Uni-Bolt™ installation tool", 3.0)
+	bolt_tool.definition.mobility = ObjectDefinition.Mobility.CARRYABLE
+	bolt_tool.definition.description = "An industrial two-mode fastening tool. R switches modes. Hold RMB for sighting."
+	bolt_tool.position = Vector3(-0.85, 0.14, 1.85)
+	add_child(bolt_tool)
+	box(bolt_tool, "Housing", Vector3(0.15, 0.115, 0.23), Vector3(0, 0.04, 0.045), dark)
+	box(bolt_tool, "Barrel", Vector3(0.069, 0.070, 0.14), Vector3(0, 0.042, -0.12), steel)
+	box(bolt_tool, "Grip", Vector3(0.073, 0.145, 0.072), Vector3(0, -0.035, 0.10), dark)
+	box(bolt_tool, "Magazine", Vector3(0.11, 0.073, 0.12), Vector3(0, -0.055, -0.005), steel)
+	box(bolt_tool, "Identification", Vector3(0.152, 0.026, 0.08), Vector3(0, 0.041, 0.042), amber)
+	bolt_tool.indicator = material(Color("83d6a8"), true)
+	box(bolt_tool, "Status", Vector3(0.020, 0.010, 0.034), Vector3(0.043, 0.101, 0.085), bolt_tool.indicator)
+	build_uni_bolt_sights(dark, steel)
+	add_shape(bolt_tool, Vector3(0.155, 0.236, 0.39), Vector3(0, 0.008, -0.015))
+	var tool_shape := bolt_tool.get_child(bolt_tool.get_child_count() - 1) as CollisionShape3D
+	tool_shape.name = "CollisionShape3D"
+	var tool_profile := HeldItemProfile.new()
+	tool_profile.envelope = tool_shape.shape
+	tool_profile.envelope_transform = tool_shape.transform
+	tool_profile.retraction_offset = Vector3(0, 0, 0.32)
+	tool_profile.lateral_clearance_limit = 0.0
+	tool_profile.anticipation_margin = 0.025
+	bolt_tool.definition.held_profile = tool_profile
+	bolt_tool.replenish()
+
+	var plate := stock_piece(&"RD-STOCK-PLATE", "Steel plate", 4.0,
+		Vector3(-4.65, 0.025, 3.8), Vector3(0.56, 0.035, 0.46), steel)
+	plate.name = "SteelPlate"
+	for index in 2:
+		var width := 0.32 if index == 0 else 0.58
+		var title := "Angle bracket" if index == 0 else "Long angle"
+		var angle := stock_piece(StringName("RD-STOCK-ANGLE-%d" % index), title, 3.0 + index,
+			Vector3(-4.15 - index * 0.68, 0.025, 2.75), Vector3(width, 0.036, 0.26), steel)
+		angle.name = "AngleBracket" if index == 0 else "LongAngle"
+		box(angle, "Flange", Vector3(width, 0.23, 0.033), Vector3(0, 0.116, -0.109), steel)
+		add_shape(angle, Vector3(width, 0.23, 0.033), Vector3(0, 0.116, -0.109))
+	stock_piece(&"RD-STOCK-BAR", "Steel bar", 5.0, Vector3(-4.9, 0.032, 3.28),
+		Vector3(0.48, 0.055, 0.11), steel).name = "SteelBar"
+	var gusset := InteractableObject.new()
+	gusset.name = "TriangularGusset"
+	gusset.definition = part_definition(&"RD-STOCK-GUSSET", "Triangular gusset", 2.0)
+	gusset.position = Vector3(-4.10, 0.026, 3.60)
+	var hull := ConvexPolygonShape3D.new()
+	hull.points = PackedVector3Array([
+		Vector3(-0.13, -0.02, -0.13), Vector3(0.13, -0.02, -0.13), Vector3(-0.13, -0.02, 0.13),
+		Vector3(-0.13, 0.02, -0.13), Vector3(0.13, 0.02, -0.13), Vector3(-0.13, 0.02, 0.13)])
+	var gusset_shape := CollisionShape3D.new()
+	gusset_shape.name = "CollisionShape3D"
+	gusset_shape.shape = hull
+	gusset.add_child(gusset_shape)
+	var triangle := MeshInstance3D.new()
+	triangle.name = "Model"
+	# Godot uses clockwise winding. The opaque prism and convex collider
+	# share the same six vertices in every interaction state.
+	var geometry := SurfaceTool.new()
+	geometry.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for vertex in [0, 2, 1, 3, 4, 5, 0, 4, 3, 0, 1, 4, 1, 5, 4, 1, 2, 5, 2, 3, 5, 2, 0, 3]:
+		geometry.add_vertex(hull.points[vertex])
+	geometry.generate_normals()
+	triangle.mesh = geometry.commit()
+	triangle.material_override = steel
+	gusset.add_child(triangle)
+	add_child(gusset)
+
+	# Recess the lower sides to expose fastening skids within the crate's
+	# existing footprint. The main body still blocks overlength drill paths.
+	var crate_model := crate.get_node("Model").get_child(0) as MeshInstance3D
+	var crate_material := crate_model.material_override
+	(crate_model.mesh as BoxMesh).size = Vector3(1.3, 1.08, 1.3)
+	crate_model.position.y = 0.11
+	var crate_shape := crate.get_node("CollisionShape3D") as CollisionShape3D
+	(crate_shape.shape as BoxShape3D).size = Vector3(1.3, 1.08, 1.3)
+	crate_shape.position.y = 0.11
+	box(crate, "LowerCrate", Vector3(0.98, 0.22, 1.3), Vector3(0, -0.54, 0), crate_material)
+	add_shape(crate, Vector3(0.98, 0.22, 1.3), Vector3(0, -0.54, 0))
+	for side in [-1, 1]:
+		var foot := Vector3(side * 0.57, -0.625, 0)
+		box(crate, "AnchorSkid", Vector3(0.16, 0.05, 0.66), foot, steel)
+		add_shape(crate, Vector3(0.16, 0.05, 0.66), foot)
+
+	test_ram = StructuralTestRam.new()
+	test_ram.name = "StructuralTestRam"
+	test_ram.position = Vector3(-4.98, 0.72, -0.5)
+	test_ram.system = fastening
+	add_child(test_ram)
+	var base := box(test_ram, "RamBase", Vector3(0.7, 1.0, 0.73), Vector3(-0.53, -0.18, 0), dark, true)
+	base.set_meta(&"no_fasteners", true)
+	box(base, "HazardMark", Vector3(0.58, 0.06, 0.74), Vector3(0, 0.21, 0), amber)
+	var guide := box(test_ram, "RodGuide", Vector3(0.5, 0.22, 0.22), Vector3(-0.38, 0, 0), steel, true) as StaticBody3D
+	guide.collision_layer = StructuralTestRam.PLAYER_SOLID_LAYER
+	guide.collision_mask = 0
+	test_ram.shaft_guard = StaticBody3D.new()
+	test_ram.shaft_guard.name = "RamShaftGuard"
+	test_ram.shaft_guard.collision_layer = StructuralTestRam.PLAYER_SOLID_LAYER
+	test_ram.shaft_guard.collision_mask = 0
+	test_ram.add_child(test_ram.shaft_guard)
+	var shaft_collision := CollisionShape3D.new()
+	test_ram.shaft_shape = BoxShape3D.new()
+	test_ram.shaft_shape.size = Vector3(0.1, 0.176, 0.176)
+	shaft_collision.shape = test_ram.shaft_shape
+	test_ram.shaft_guard.add_child(shaft_collision)
+	var face := AnimatableBody3D.new()
+	face.name = "RamFace"
+	face.sync_to_physics = false
+	face.collision_layer = StructuralTestRam.PLAYER_SOLID_LAYER
+	face.collision_mask = 1 | 2
+	test_ram.add_child(face)
+	add_shape(face, Vector3(0.105, 0.42, 0.57), Vector3.ZERO)
+	box(face, "Pusher", Vector3(0.105, 0.42, 0.57), Vector3.ZERO, amber)
+	test_ram.face = face
+	test_ram.rod_sleeve = ram_rod(test_ram, "PistonSleeve", 0.088, steel)
+	test_ram.rod_core = ram_rod(test_ram, "PistonCore", 0.058, material(Color("afc2ca")))
+	test_ram.update_stroke_visuals()
+	box(test_ram, "ReactionWeb", Vector3(0.40, 0.84, 0.15),
+		Vector3(4.35, -0.30, 0.40), dark, true)
+	label_at(test_ram, "", Vector3(-0.53, 0.5, 0.38), 17)
+	test_ram.readout = test_ram.get_child(test_ram.get_child_count() - 1) as Label3D
+	build_ram_pillar(dark, amber)
+
+func build_ram_pillar(dark: Material, amber: Material) -> void:
+	var pillar := InteractableObject.new()
+	pillar.name = "HydraulicControlPillar"
+	pillar.position = Vector3(-5.34, 0, 0.72)
+	pillar.definition = part_definition(&"RD-RAM-CONTROLS", "Hydraulic control pillar", 45.0)
+	pillar.definition.mobility = ObjectDefinition.Mobility.FIXED
+	pillar.definition.description = "Structural test actuator controls. [E] to operate."
+	pillar.definition.available_actions.assign([&"inspect", &"use_terminal"])
+	pillar.set_meta(&"no_fasteners", true)
+	add_child(pillar)
+	box(pillar, "FloorFoot", Vector3(0.60, 0.09, 0.49), Vector3(0, 0.045, 0), dark)
+	box(pillar, "Pedestal", Vector3(0.31, 1.04, 0.28), Vector3(0, 0.54, 0), dark)
+	add_shape(pillar, Vector3(0.34, 1.07, 0.30), Vector3(0, 0.535, 0))
+	box(pillar, "SafetyStripe", Vector3(0.32, 0.08, 0.292), Vector3(0, 0.81, 0), amber)
+	var head := Node3D.new()
+	head.position = Vector3(0, 1.12, 0.04)
+	head.rotation.x = -0.30
+	pillar.add_child(head)
+	box(head, "Console", Vector3(0.76, 0.51, 0.17), Vector3.ZERO, dark)
+	box(head, "SafetyLip", Vector3(0.76, 0.034, 0.18), Vector3(0, -0.239, 0), amber)
+	add_shape(pillar, Vector3(0.76, 0.51, 0.17), head.position)
+	pillar.get_child(pillar.get_child_count() - 1).rotation = head.rotation
+	var display := SubViewport.new()
+	display.disable_3d = true
+	display.size = Vector2i(760, 500)
+	display.render_target_update_mode = SubViewport.UPDATE_WHEN_VISIBLE
+	pillar.add_child(display)
+	var screen := MeshInstance3D.new()
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.68, 0.445)
+	screen.mesh = quad
+	var glass := StandardMaterial3D.new()
+	glass.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glass.albedo_texture = display.get_texture()
+	screen.material_override = glass
+	screen.position.z = 0.09
+	head.add_child(screen)
+	var anchor := Marker3D.new()
+	anchor.position.z = 0.94
+	head.add_child(anchor)
+	ram_session = TerminalInteraction.new()
+	ram_session.name = "RamInteraction"
+	add_child(ram_session)
+	ram_session.configure_ram($Otis, pillar, test_ram, screen, anchor, display)
+	ram_session.active_changed.connect($InteractionUI.set_terminal_active)
+
+func build_uni_bolt_sights(dark: Material, steel: Material) -> void:
+	var insert := material(Color("78be8e"), true)
+	insert.emission_energy_multiplier = 0.40
+	box(bolt_tool, "ForkBase", Vector3(0.064, 0.012, 0.035), Vector3(0, 0.081, -0.161), steel)
+	for side in [-1, 1]:
+		box(bolt_tool, "ForkEar", Vector3(0.016, 0.038, 0.033), Vector3(side * 0.024, 0.101, -0.161), dark)
+		box(bolt_tool, "ForkInsert", Vector3(0.003, 0.008, 0.018), Vector3(side * 0.015, 0.111, -0.161), insert)
+	var tip := FasteningTool.REAR_SIGHT_TIP
+	box(bolt_tool, "RearProng", Vector3(0.009, 0.010, 0.017), tip - Vector3.UP * 0.008, dark)
+	box(bolt_tool, "RearProngTip", Vector3(0.007, 0.004, 0.012), tip - Vector3.UP * 0.002, insert)
+
+func ram_rod(parent: Node3D, title: String, radius: float, surface: Material) -> MeshInstance3D:
+	var instance := MeshInstance3D.new()
+	instance.name = title
+	var cylinder_mesh := CylinderMesh.new()
+	cylinder_mesh.top_radius = radius
+	cylinder_mesh.bottom_radius = radius
+	cylinder_mesh.height = 1.0
+	cylinder_mesh.radial_segments = 12
+	cylinder_mesh.rings = 0
+	instance.mesh = cylinder_mesh
+	instance.material_override = surface
+	instance.rotation.z = PI * 0.5
+	parent.add_child(instance)
+	return instance
+
+func stock_piece(id: StringName, title: String, kilograms: float, at: Vector3,
+		size: Vector3, surface: Material) -> InteractableObject:
+	var piece := InteractableObject.new()
+	piece.definition = part_definition(id, title, kilograms)
+	piece.position = at
+	add_child(piece)
+	box(piece, "Model", size, Vector3.ZERO, surface)
+	add_shape(piece, size, Vector3.ZERO)
+	piece.get_child(piece.get_child_count() - 1).name = "CollisionShape3D"
+	return piece

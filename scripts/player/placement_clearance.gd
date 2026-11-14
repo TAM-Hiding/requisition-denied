@@ -11,6 +11,7 @@ const MAX_CONTACT_TURN := 0.025
 const MIN_CONTACT_PROGRESS := 0.00005
 
 var collider: CollisionShape3D
+var shapes: Array[CollisionShape3D] = []
 var item: InteractableObject
 var space: PhysicsDirectSpaceState3D
 var radius: float
@@ -20,51 +21,72 @@ func configure(body: InteractableObject) -> bool:
 	collider = body.get_node_or_null("CollisionShape3D") as CollisionShape3D
 	if collider == null or collider.disabled or collider.shape == null:
 		return false
-	if not (collider.shape is BoxShape3D or collider.shape is SphereShape3D
-			or collider.shape is CapsuleShape3D or collider.shape is CylinderShape3D
-			or collider.shape is ConvexPolygonShape3D):
-		return false
+	shapes.clear()
+	radius = 0.0
 	for owner in body.get_shape_owners():
-		if not body.is_shape_owner_disabled(owner) and body.shape_owner_get_owner(owner) != collider:
+		if body.is_shape_owner_disabled(owner):
+			continue
+		var part := body.shape_owner_get_owner(owner) as CollisionShape3D
+		if part == null or not (part.shape is BoxShape3D or part.shape is SphereShape3D
+				or part.shape is CapsuleShape3D or part.shape is CylinderShape3D
+				or part.shape is ConvexPolygonShape3D):
 			return false
+		shapes.append(part)
+		var bounds := part.transform * part.shape.get_debug_mesh().get_aabb()
+		radius = maxf(radius, bounds.position.abs().max(bounds.end.abs()).length())
 	item = body
 	space = body.get_world_3d().direct_space_state
-	var bounds := collider.transform * collider.shape.get_debug_mesh().get_aabb()
-	radius = bounds.position.abs().max(bounds.end.abs()).length()
-	return true
+	return not shapes.is_empty()
 
-func query(pose: Transform3D, mask: int, extra_margin: float = 0.0) -> PhysicsShapeQueryParameters3D:
+func query(pose: Transform3D, mask: int, extra_margin: float = 0.0,
+		part: CollisionShape3D = null) -> PhysicsShapeQueryParameters3D:
+	if part == null:
+		part = collider
 	var parameters := PhysicsShapeQueryParameters3D.new()
-	parameters.shape = collider.shape
-	parameters.transform = pose * collider.transform
+	parameters.shape = part.shape
+	parameters.transform = pose * part.transform
 	parameters.collision_mask = mask
 	parameters.exclude = [item.get_rid()]
 	parameters.margin = RELEASE_MARGIN + extra_margin
 	return parameters
 
 func clear(pose: Transform3D, mask: int = 3, extra_margin: float = 0.0) -> bool:
-	return space.intersect_shape(query(pose, mask, extra_margin), 1).is_empty()
+	for part in shapes:
+		if not space.intersect_shape(query(pose, mask, extra_margin, part), 1).is_empty():
+			return false
+	return true
+
+func rest_contact(pose: Transform3D, mask := 3) -> Dictionary:
+	for part in shapes:
+		var contact := space.get_rest_info(query(pose, mask, 0.0, part))
+		if not contact.is_empty():
+			return contact
+	return {}
+
+func sweep_fractions(pose: Transform3D, motion: Vector3, margin: float) -> Vector2:
+	var fractions := Vector2.ONE
+	for part in shapes:
+		var parameters := query(pose, 3, margin - RELEASE_MARGIN, part)
+		parameters.motion = motion
+		var hit := space.cast_motion(parameters)
+		fractions = fractions.min(Vector2(hit[0], hit[1]))
+	return fractions
 
 ## Check the real occupied volume without the manipulation margin.
 func physically_clear(pose: Transform3D) -> bool:
-	var parameters := query(pose, 3)
-	parameters.margin = 0.0
-	return space.intersect_shape(parameters, 1).is_empty()
+	return clear(pose, 3, -RELEASE_MARGIN)
 
 ## Leave a resting contact using the physical shape before resuming padded placement.
 func depart_resting_pose(pose: Transform3D, displacement: Vector3) -> Transform3D:
 	if not physically_clear(pose):
 		return pose
-	var contact := space.get_rest_info(query(pose, 3))
+	var contact := rest_contact(pose)
 	if not contact.is_empty():
 		var normal: Vector3 = contact.normal
 		displacement -= normal * minf(0.0, displacement.dot(normal))
 	if displacement.length_squared() <= MOTION_EPSILON * MOTION_EPSILON:
 		return pose
-	var parameters := query(pose, 3)
-	parameters.margin = 0.0
-	parameters.motion = displacement
-	var safe_fraction := space.cast_motion(parameters)[0]
+	var safe_fraction := sweep_fractions(pose, displacement, 0.0).x
 	var candidate := pose.translated(displacement * safe_fraction)
 	return candidate if physically_clear(candidate) else pose
 
@@ -93,7 +115,7 @@ func pickup_pose(pose: Transform3D, debug_failure := false, preferred := Vector3
 			normals.append(normal)
 			combined += normal
 	var initial := query(pose, 3)
-	var resting := space.get_rest_info(initial)
+	var resting := rest_contact(pose)
 	if not resting.is_empty() and not normals.any(func(normal: Vector3) -> bool: return normal.dot(resting.normal) > 0.999):
 		normals.append(resting.normal)
 		combined += resting.normal
@@ -102,9 +124,7 @@ func pickup_pose(pose: Transform3D, debug_failure := false, preferred := Vector3
 	directions.append(Vector3.UP)
 	directions.append(clip_motion(preferred.normalized(), normals).normalized())
 	directions.append((combined.normalized() + preferred.normalized()).normalized())
-	var exact := query(pose, 3)
-	exact.margin = 0.0
-	var starts_clear := space.intersect_shape(exact, 1).is_empty()
+	var starts_clear := physically_clear(pose)
 	var attempts: Array[Dictionary] = []
 	motion.recovery_as_collision = false
 	# The backend recovers before sweeping. Short outward alternatives can
@@ -117,9 +137,8 @@ func pickup_pose(pose: Transform3D, debug_failure := false, preferred := Vector3
 			# A valid resting pose can touch the manipulation margin. Test an
 			# extraction with actual geometry before asking for preview clearance.
 			if starts_clear:
-				exact.motion = motion.motion
 				var end := pose.translated(motion.motion)
-				var safe := space.cast_motion(exact)
+				var safe := sweep_fractions(pose, motion.motion, 0.0)
 				if safe[0] >= 1.0 and clear(end):
 					return end
 				if debug_failure:
@@ -131,17 +150,20 @@ func pickup_pose(pose: Transform3D, debug_failure := false, preferred := Vector3
 			var blocked := PhysicsServer3D.body_test_motion(item.get_rid(), motion, result)
 			var candidate := pose
 			candidate.origin += result.get_travel()
-			var destination := space.intersect_shape(query(candidate, 3), 1)
-			if not blocked and result.get_travel().length() <= PICKUP_LIMIT and destination.is_empty():
+			if not blocked and result.get_travel().length() <= PICKUP_LIMIT and clear(candidate):
 				return candidate
 			if debug_failure:
-				var body: Object
+				var body: Object = null
 				if result.get_collision_count() > 0:
 					body = result.get_collider()
-				elif not destination.is_empty():
-					body = destination[0].collider
+				else:
+					for part in shapes:
+						var hits := space.intersect_shape(query(candidate, 3, 0.0, part), 1)
+						if not hits.is_empty():
+							body = hits[0].collider
+							break
 				attempts.append({"direction": direction, "destination": candidate.origin,
-					"result": "path" if blocked else "destination" if not destination.is_empty() else "recovery limit",
+					"result": "path" if blocked else "destination" if is_instance_valid(body) else "recovery limit",
 					"blocker": _pickup_blocker(body)})
 	if debug_failure:
 		var contacts := space.intersect_shape(initial, 8)
@@ -193,7 +215,7 @@ func slide(pose: Transform3D, displacement: Vector3, mask: int = 3) -> Transform
 		if not clear(candidate, mask):
 			# The sweep and overlap query can disagree near contact. Keep a
 			# verified pose and still resolve the tangential remainder.
-			var contact := space.get_rest_info(query(candidate, mask))
+			var contact := rest_contact(candidate, mask)
 			if not contact.is_empty():
 				normals.append(contact.normal)
 			fraction = clear_fraction(pose, remaining, fraction, mask)
@@ -314,9 +336,9 @@ func accommodate_contact(pose: Transform3D, displacement: Vector3) -> Transform3
 	return pose
 
 func sweep_translation(pose: Transform3D, motion: Vector3) -> Transform3D:
-	var parameters := query(pose, 3)
-	parameters.motion = motion
-	var fraction := space.cast_motion(parameters)[0]
+	if motion.is_zero_approx():
+		return pose
+	var fraction := sweep_fractions(pose, motion, RELEASE_MARGIN).x
 	if fraction < 1.0:
 		fraction = maxf(0, fraction - 0.0002 / motion.length())
 	var candidate := pose

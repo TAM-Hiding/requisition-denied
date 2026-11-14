@@ -12,6 +12,8 @@ var entries := ItemList.new()
 var detail := RichTextLabel.new()
 var submit_button := Button.new()
 var brightness := HSlider.new()
+var settings_panel: MechanicalSettingsPanel
+var brightness_readout := Label.new()
 var footer := Label.new()
 var standby := Label.new()
 var interface := VBoxContainer.new()
@@ -34,11 +36,15 @@ func configure(data: AdministrativeSession, otis: OtisController, id: StringName
 	var appearance := Theme.new()
 	appearance.default_font = mono
 	appearance.default_font_size = 21
-	for type in ["Label", "Button", "ItemList"]:
+	for type in ["Label", "Button", "ItemList", "CheckBox", "LineEdit"]:
 		appearance.set_color("font_color", type, PHOSPHOR)
 	appearance.set_color("default_color", "RichTextLabel", PHOSPHOR)
 	appearance.set_color("font_selected_color", "ItemList", Color("dcf5d5"))
 	appearance.set_color("font_focus_color", "Button", Color("dcf5d5"))
+	appearance.set_color("font_placeholder_color", "LineEdit", Color("789473"))
+	appearance.set_color("caret_color", "LineEdit", PHOSPHOR)
+	appearance.set_stylebox("normal", "LineEdit", _frame(Color("0c1b12"), Color("435c43")))
+	appearance.set_stylebox("focus", "LineEdit", _frame(Color.TRANSPARENT, PHOSPHOR))
 	appearance.set_stylebox("normal", "Button", _frame(Color("14251a"), Color("435c43")))
 	appearance.set_stylebox("hover", "Button", _frame(Color("223b28"), Color("799676")))
 	appearance.set_stylebox("pressed", "Button", _frame(Color("294a30"), Color("a1c597")))
@@ -95,7 +101,12 @@ func configure(data: AdministrativeSession, otis: OtisController, id: StringName
 	brightness.custom_minimum_size.y = 28
 	brightness.set_value_no_signal(session.text_brightness)
 	brightness.value_changed.connect(_set_brightness)
-	right.add_child(brightness)
+	settings_panel = MechanicalSettingsPanel.new()
+	settings_panel.settings = actor.placement.mechanical_settings
+	settings_panel.size_flags_vertical = SIZE_EXPAND_FILL
+	right.add_child(settings_panel)
+	settings_panel.brightness_slot.add_child(brightness_readout)
+	settings_panel.brightness_slot.add_child(brightness)
 	interface.add_child(footer)
 	footer.add_theme_font_size_override("font_size", 16)
 	standby.text = "▣  THE FACILITY\nADMINISTRATIVE WORKSTATION\n\nOPERATIONAL  /  [E] ACCESS"
@@ -125,14 +136,15 @@ func show_section(value: String) -> void:
 	if value not in SECTIONS:
 		return
 	section = value
-	var button := navigation.get_child(SECTIONS.find(value)) as Button
-	button.set_pressed_no_signal(true)
+	for index in SECTIONS.size():
+		(navigation.get_child(index) as Button).set_pressed_no_signal(SECTIONS[index] == value)
 	_selected = null
 	_request_result = {}
 	entries.clear()
 	entries.visible = value in ["Messages", "Requisitions", "Records"]
 	submit_button.hide()
-	brightness.visible = value == "Settings"
+	settings_panel.visible = value == "Settings"
+	detail.visible = value != "Settings"
 	match value:
 		"Messages":
 			_fill_messages()
@@ -148,7 +160,7 @@ func show_section(value: String) -> void:
 				_add_entry(facts.back().name, id)
 			detail.text = "OTIS / INSPECTION RECORDS\n\n" + ("No objects inspected." if entries.item_count == 0 else "Select an inspected object.")
 		"Settings":
-			_show_brightness()
+			settings_panel.refresh()
 	_update_footer()
 
 func _add_entry(label: String, metadata: Variant) -> void:
@@ -229,11 +241,7 @@ func _show_inventory() -> void:
 func _set_brightness(value: float) -> void:
 	session.text_brightness = value
 	interface.modulate = Color(value, value, value)
-	if section == "Settings":
-		_show_brightness()
-
-func _show_brightness() -> void:
-	detail.text = "DISPLAY SETTINGS\n\nText brightness  %d%%" % roundi(session.text_brightness * 100.0)
+	brightness_readout.text = "CRT text brightness  %d%%" % roundi(session.text_brightness * 100.0)
 
 func _observe_event(event: Dictionary) -> void:
 	_latest_event = String(event.type).replace("_", " ")

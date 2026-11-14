@@ -34,7 +34,6 @@ godot --path .
 | G tap / hold | Hold for 0.2 s to manipulate an equipped item or a targeted movable object. Release the hold to keep manipulating. Tap G to place, or to drop ordinary equipment when idle. |
 | 1 | Retrieve the first stored item into the active slot |
 | F3 | Toggle developer diagnostics |
-| F4 | Open or close Development / Mechanical Interaction |
 
 Movement is suspended while a menu is open or the mouse is released. The menu
 supports keyboard navigation with Tab / arrow keys and Enter. Inspect records
@@ -53,7 +52,7 @@ world physics continues.
   Approvals do not deliver equipment or change access.
 - **Inventory** displays equipment, storage capacity, and Otis's chassis diagnostics.
 - **Records** displays what Otis has learned through inspection.
-- **Settings** controls CRT text brightness for the current session.
+- **Settings** provides controls, mechanics, visuals and development preferences.
 
 ## Chassis and carrying
 
@@ -70,7 +69,7 @@ objects drag horizontally under gravity. The plate measures suspended weight
 through Otis's contact with the floor.
 
 Middle-mouse rotation continues across complete revolutions. Adjust horizontal
-and vertical rotation inversion independently in the F4 panel. The
+and vertical rotation inversion independently in the terminal's **Settings → Controls**. The
 `PrecisionPlacement` scene node still exposes rotation sensitivity and initial
 inversion defaults. Both inversion flags are shipped off.
 
@@ -99,10 +98,14 @@ connections are available as definition data.
 
 ### Mechanical Interaction settings
 
-Press **F4** during first-person gameplay. Values apply live to subsequent
-installation attempts. **Save Settings** persists the profile in
-`user://mechanical_interaction_settings.json`. **Reset to Defaults** restores
-live defaults. Save afterward to keep the reset on restart.
+Press **E** at the administrative CRT and open **Settings**. Controls lists
+bindings and live sensitivity and rotation options. Mechanics holds the
+installation settings below. Visuals includes CRT text brightness and
+**Fastener Visual Scale (%)**, from 75% to 250% in 5% steps, defaulting to 100%.
+It applies immediately to the diameter of installed heads, shanks, and remnants, and to their selection
+targets. Shaft length follows the measured material stack. Development contains diagnostics and JSON controls. **Save** persists
+the profile in `user://mechanical_interaction_settings.json`. **Reset Defaults**
+restores live defaults. Save afterward to keep the reset on restart.
 
 | Field | Default | Range |
 | --- | ---: | ---: |
@@ -115,22 +118,31 @@ live defaults. Save afterward to keep the reset on restart.
 Acquisition must be at least as wide as snap distance. The generator retains
 its authored front approach allowance. Clearance checks still apply to all
 mounts. **F3** displays the candidate, distance, axis and key errors, path
-status, and installation eligibility. When enabled in F4, pickup diagnostics
+status, and installation eligibility. When enabled under Development, pickup diagnostics
 also log the original pose, contacts, candidate extraction paths, and
 clearance failure stage to the Godot console.
 
-**Export Snapshot** writes `mechanical_interaction_<timestamp>_<ticks>.json`
+**Export JSON** writes `mechanical_interaction_<timestamp>_<ticks>.json`
 in the project user-data directory and displays its absolute path. On Linux
 the directory defaults to
 `~/.local/share/godot/app_userdata/Requisition Denied/`, subject to
-`XDG_DATA_HOME`. **Import Snapshot** opens a file picker and applies a valid
-file live. Save separately to make it the launch profile.
+`XDG_DATA_HOME`. To import, choose **Browse** or enter the absolute or
+`user://` snapshot path and choose **Import JSON**. Save separately to make
+it the launch profile.
 
-The snapshot uses schema version 1.
+The snapshot uses schema version 1. Older files default missing scale and
+sensitivity fields. Out-of-range scale is rejected and in-range values round
+to the nearest 5%.
 
 ```json
 {
   "schema_version": 1,
+  "fastener_visual_scale_percent": 100,
+  "controls": {
+    "mouse_sensitivity": 0.0025,
+    "precision_rotation_sensitivity": 0.009,
+    "ads_sensitivity_multiplier": 0.75
+  },
   "installation": {
     "acquisition_distance_m": 0.3,
     "snap_distance_m": 0.2,
@@ -144,6 +156,88 @@ The snapshot uses schema version 1.
 }
 ```
 
+## Uni-Bolt™ fastening and structural tests
+
+The installation tool is on the floor ahead and left of Otis's spawn. Stock
+plates, angles, a bar and a gusset are grouped along the southwest side. The
+orange-faced structural test ram is west of the storage crate. Approach the
+yellow-trimmed hydraulic pillar beside it and press **E** for **Force −**,
+**Force +**, **Extend**, **Retract**, **Stop**, and **Reset**. The slider jumps
+between force presets from 60 to 24,000. The readout shows actual load, force
+limit, stroke and status. Stop holds the current stroke. Reset retracts the
+ram and preserves damage. F5–F7 remain available as development shortcuts.
+
+| Input | Action |
+| --- | --- |
+| Left mouse | Install or remove an individual fastener with the tool equipped |
+| Right mouse (hold) | Aim down sights and pin a suspended workpiece at its current world pose |
+| R | Switch INSTALL / REMOVE |
+| G (hold / tap) | Acquire a loose workpiece / place the grabbed workpiece while carrying the Uni-Bolt |
+| 1 | Stow the equipped Uni-Bolt or retrieve it from storage, including during a world grab |
+| X | Drop the equipped Uni-Bolt using the ordinary collision-safe drop check |
+| F5 | Extend or retract the ram |
+| F6 / Shift+F6 | Increase or decrease the ram force limit |
+| F7 | Reset and retract the ram |
+| F8 / F9 | Cycle test grades / refill the selected grade while equipped |
+
+To fasten while holding a part, equip the tool and hold **G** on a loose
+plate or angle. You can also stow the tool with **1**, start manipulating a
+workpiece, then press **1** to retrieve the tool and keep adjusting the part.
+With empty storage, look at a loose tool in reach and press **1** during a
+world grab to equip it. Holding **RMB** pins the workpiece and aligns the
+sights with the center ray. Releasing **RMB** smoothly resumes camera-relative
+positioning. Use the wheel and middle mouse to adjust the workpiece outside ADS.
+Aim through the part into its backing and click. The first successful bolt
+transfers control to the assembly immediately. Additional clicks at separate
+locations reinforce that body pair. Press **R** and aim at each bolt head to
+remove it. Removing the last bolt on an edge restores ordinary interaction
+where the resulting island is free.
+
+The installation ray follows the center sight. A short second ray along the
+surface normal identifies the backing material and a reverse ray checks that
+the entry body is close to it. A bolt is 152.4 mm long. The tool allows a 25 mm
+maximum gap at the interface and reserves 6 mm of engagement. The crate can be
+anchored through its exposed lower skids by aiming down at them from the side.
+The full crate body is too thick for a through-fastener.
+
+| Grade | Strength units | Finish |
+| --- | ---: | --- |
+| Standard | 100 | Satin steel |
+| Grade 8 | 300 | Polished champagne brass |
+| MegaBolt | 9,999 | Dark bronze with a faint violet identification ring |
+
+The 20-round magazine holds one grade. Intact rounds recover with their
+original IDs and grades. Full or mismatched recoveries go to reserve. The
+development grade selector loads matching reserves before topping up with
+test rounds. Failed bolts leave a visible remnant.
+
+The ram applies a capped impulse to a free specimen and stalls under a fixed
+reaction. Force presets range from 60 to 24,000 units. For a sideways load
+test, put an angle against the narrow reaction web near the end of the ram
+stroke. Leave the free leg projecting into the ram's path. F3 shows body pair,
+depth, group, individual loads and strengths, and recent failures. The ram
+readout includes configured and estimated force, travel, displacement and
+the last failed group. The piston sleeves follow the actual swept pushing
+plate, including at stalls. Reset retracts the ram while preserving damage.
+F3 labels applied load and rated strength separately. A zero applied load
+is the expected reading for a newly installed fastener.
+
+Freeform groups retain original bodies, local attachment transforms and
+individual bolt records. Each connected island uses one simulated compound
+collider. When a group splits, the detached bodies recover their original
+collision and inherit the island's velocity. The load estimate shares direct
+force and adds a moment based on application point, direction and bolt
+spacing. The most overloaded bolt fails first and the surviving bolts are
+evaluated again. Anchored islands use the shortest available path to a fixed
+support. After that path breaks, a new support must exist to carry the same
+reaction. On later ram contacts, a free island transmits acceleration loads
+based on downstream mass and its lever arm. Redundant loops have no inferred
+free-island branch load. This is a gameplay approximation for ram and explicit
+test loads. A committed bolt that overloads reports its failure in the HUD.
+Ordinary collisions do not accumulate fastener damage. Compound islands can
+be pushed physically. To precision-grab an individual member, detach it
+first. Fastening data and ammunition remain session-local.
+
 ## Structure
 
 - `scenes/facility.tscn`: project entry point, Otis and interaction UI.
@@ -155,6 +249,7 @@ The snapshot uses schema version 1.
 - `scripts/player/`: chassis, locomotion, equipment, shared precision manipulation, supported drag,
   and the NORMAL/LOWERED presentation poses for handheld items.
 - `scripts/ui/`: contextual HUD, terminal camera and input ownership, and the in-world terminal display.
+- `scripts/fastening/`: physical attachment graph, grade and bolt records, installation tool and ram.
 - `scripts/administration/`: Facility-owned messages, requisition records and administrative events.
 - `tests/`: engine-level validation and startup smoke test.
 

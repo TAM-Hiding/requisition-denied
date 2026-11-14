@@ -238,17 +238,20 @@ func run() -> void:
 
 	await continuous_rotation(otis, wrench)
 	if DisplayServer.get_name() != "headless":
-		var settings_key := InputEventKey.new()
-		settings_key.physical_keycode = KEY_F4
-		settings_key.pressed = true
-		ui._input(settings_key)
-		check(ui.mechanical_panel.visible and not otis.controls_enabled and otis.placement.input_suspended
-			and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE, "F4 settings own gameplay input and show the cursor")
-		ui.mechanical_panel.switches[3].set_pressed(true)
-		check(otis.placement.invert_vertical_rotation, "The panel applies rotation preferences live")
-		ui.mechanical_panel.reset()
-		ui._input(settings_key)
-		check(not ui.mechanical_panel.visible and otis.controls_enabled and not otis.placement.input_suspended
+		var workstation := facility.get_node("Terminal") as TerminalWorkstation
+		var session: TerminalInteraction = facility.terminal_session
+		otis.global_position = Vector3(0, 0.02, -4.10)
+		await frames(2)
+		otis.camera.look_at(workstation.global_position)
+		check(session.enter() and not otis.controls_enabled and otis.placement.input_suspended
+			and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE, "CRT settings own gameplay input and show the cursor")
+		session.screen_ui.show_section("Settings")
+		var preferences := session.screen_ui.settings_panel
+		(preferences.toggles["invert_vertical"][1] as CheckBox).set_pressed(true)
+		check(otis.placement.invert_vertical_rotation, "The CRT applies rotation preferences live")
+		preferences.reset()
+		session.leave()
+		check(not session.active and otis.controls_enabled and not otis.placement.input_suspended
 			and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED, "Closing settings restores mouse capture and gameplay")
 
 	facility.queue_free()

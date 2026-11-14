@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="FastenerGrade" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/fastening/fastener_grade.gd" id="1"]
+
+[sub_resource type="StandardMaterial3D" id="Finish"]
+albedo_color = Color(0.79, 0.57, 0.32, 1)
+metallic = 0.86
+roughness = 0.23
+anisotropy_enabled = true
+anisotropy = 0.16
+
+[sub_resource type="StandardMaterial3D" id="Accent"]
+albedo_color = Color(0.90, 0.71, 0.50, 1)
+metallic = 0.52
+roughness = 0.35
+emission_enabled = false
+emission = Color(0.90, 0.71, 0.50, 1)
+emission_energy_multiplier = 0
+
+[resource]
+script = ExtResource("1")
+title = "Grade 8"
+strength = 300.0
+finish = SubResource("Finish")
+accent = SubResource("Accent")

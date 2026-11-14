@@ -4,6 +4,9 @@ extends Node
 enum Pose { NORMAL, LOWERED }
 var requested_pose: Pose = Pose.NORMAL
 var pose_blend: float = 0.0
+var aim_requested := false
+var station_active := false
+var aim_blend := 0.0
 var lateral_shift: float = 0.0
 var item: InteractableObject
 var actor: OtisController
@@ -53,6 +56,14 @@ func _process(delta: float) -> void:
 	# on render frames between physics ticks, including sudden camera turns.
 	update_pose(delta)
 
+func set_station_active(active: bool) -> void:
+	station_active = active
+	_previous_valid = false
+	if active and is_instance_valid(item):
+		item.hide()
+	elif not active:
+		update_pose(0.0)
+
 func query(shape: Shape3D, transform: Transform3D, motion: Vector3 = Vector3.ZERO) -> PhysicsShapeQueryParameters3D:
 	var parameters := PhysicsShapeQueryParameters3D.new()
 	parameters.shape = shape
@@ -65,18 +76,31 @@ func query(shape: Shape3D, transform: Transform3D, motion: Vector3 = Vector3.ZER
 
 func pose_origin_camera() -> Vector3:
 	var base := actor.camera.to_local(anchor.global_position)
-	return base + profile.lowered_offset * pose_blend
+	var normal := base + profile.lowered_offset * pose_blend
+	if item is FasteningTool:
+		var aim := Vector3(0, -FasteningTool.REAR_SIGHT_TIP.y, -0.48)
+		return Vector3(0.27, -0.25, -0.56).lerp(aim, aim_blend)
+	return normal
+
+func sight_replaces_crosshair() -> bool:
+	if not aim_requested or aim_blend < 0.999 or not is_instance_valid(item) or not item.visible:
+		return false
+	var tip := actor.camera.to_local(item.to_global(FasteningTool.REAR_SIGHT_TIP))
+	return absf(tip.x) < 0.001 and absf(tip.y) < 0.001 and -tip.z > actor.camera.near + 0.01
+
+func presentation_basis() -> Basis:
+	return actor.camera.global_basis if item is FasteningTool else anchor.global_basis
 
 func retraction_origin_camera(normal: Vector3, amount: float, depth: float = 1.0) -> Vector3:
 	var direction := -1.0 if normal.x >= 0 else 1.0
 	return normal + profile.retraction_offset * depth + Vector3(direction * amount, 0, 0)
 
 func volume_clear(space: PhysicsDirectSpaceState3D, origin: Vector3) -> bool:
-	var transform := Transform3D(anchor.global_basis, origin) * profile.envelope_transform
+	var transform := Transform3D(presentation_basis(), origin) * profile.envelope_transform
 	return space.intersect_shape(query(profile.envelope, transform), 1).is_empty()
 
 func travel_limit(space: PhysicsDirectSpaceState3D, retracted: Vector3, normal: Vector3, extra_margin: float = 0) -> float:
-	var start := Transform3D(anchor.global_basis, retracted) * profile.envelope_transform
+	var start := Transform3D(presentation_basis(), retracted) * profile.envelope_transform
 	var parameters := query(profile.envelope, start, normal - retracted)
 	parameters.margin += extra_margin
 	# An enlarged anticipation volume may overlap at the safe retracted end.
@@ -97,9 +121,13 @@ func update_pose(delta: float) -> void:
 	var speed: float = profile.pose_transition_speed if profile != null else 8.0
 	var target := 1.0 if requested_pose == Pose.LOWERED else 0.0
 	pose_blend = lerpf(pose_blend, target, 1.0 - exp(-speed * maxf(0, delta)))
+	aim_blend = move_toward(aim_blend, 1.0 if aim_requested else 0.0, maxf(0.0, delta) * 8.0)
 	if absf(pose_blend - target) < 0.0001:
 		pose_blend = target
 	if not is_instance_valid(item) or item.state != InteractableObject.State.HELD:
+		return
+	if station_active:
+		item.hide()
 		return
 	if profile.envelope == null:
 		item.hide()
@@ -160,7 +188,7 @@ func update_pose(delta: float) -> void:
 		obstructed = true
 		_previous_valid = false
 		return
-	item.position = anchor.to_local(position)
+	item.global_transform = Transform3D(presentation_basis(), position)
 	item.show()
 	obstructed = extension < 0.999 or lateral_shift > 0.001
 	_previous_origin = position

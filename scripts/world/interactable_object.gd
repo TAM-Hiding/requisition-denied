@@ -4,6 +4,7 @@ extends RigidBody3D
 enum State { WORLD, HELD, STOWED, MOVING, CARRIED }
 @export var definition: ObjectDefinition
 var state: State = State.WORLD
+var fastened := false
 var support_carrier: CharacterBody3D
 var _mobility_override: int = -1
 var move_goal: Vector3
@@ -27,7 +28,7 @@ func mobility() -> int:
 	return definition.mobility if definition != null else ObjectDefinition.Mobility.FIXED
 
 func set_mobility(value: ObjectDefinition.Mobility) -> bool:
-	if state != State.WORLD:
+	if state != State.WORLD or fastened:
 		return false
 	_mobility_override = value
 	freeze = value == ObjectDefinition.Mobility.FIXED
@@ -50,7 +51,7 @@ func query_actions() -> Array[StringName]:
 	for action in definition.available_actions:
 		if action not in [&"pick_up", &"move", &"stow", &"lift"]:
 			actions.append(action)
-	if state == State.WORLD:
+	if state == State.WORLD and not fastened:
 		if mobility() == ObjectDefinition.Mobility.CARRYABLE:
 			actions.append(&"pick_up")
 			actions.append(&"move")
