@@ -81,6 +81,8 @@ func use(camera: Camera3D, actor: PhysicsBody3D) -> String:
 	if removing:
 		system.reconcile()
 		var target := system.target_bolt(camera.global_position, -camera.global_basis.z, RANGE, actor)
+		if target != null and not system.assembly_available(target.a):
+			return "PLACE ASSEMBLY BEFORE REMOVING FASTENERS"
 		if not system.remove(target):
 			return "NO INTACT FASTENER TARGETED"
 		if target.grade == GRADES[grade_index] and rounds.size() < CAPACITY:

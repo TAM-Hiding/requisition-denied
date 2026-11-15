@@ -151,7 +151,7 @@ func _physics_process(delta: float) -> void:
 		help.text = "Hold G Grab  •  1 Stow  •  X Drop Tool  •  E Context  •  F3 Debug"
 	else:
 		help.text = "WASD Move  •  E Context  •  Hold E Stow  •  1 Equip  •  G Drop / hold to place or grab  •  Esc Cursor  •  F3 Debug  •  Terminal Settings"
-	status.visible = tool != null or not placing or not otis.placement.valid or socket != null
+	status.visible = feedback_time > 0 or tool != null or not placing or not otis.placement.valid or socket != null
 	advance_hold(delta)
 	if gameplay_input_allowed():
 		otis.placement.advance_drop()
@@ -220,15 +220,21 @@ func _physics_process(delta: float) -> void:
 	debug_label.text += "\nEQUIPMENT POSE  " + HeldItemPresentation.Pose.keys()[otis.equipment.presentation.requested_pose]
 
 	if debug_visible:
+		var fastening: FasteningSystem = get_parent().fastening
 		if target != null:
-			var fastening: FasteningSystem = get_parent().fastening
-			var links := fastening.incident(target)
-			var assembly_root := fastening.physics_root(target)
-			debug_label.text += "\nASSEMBLY  " + ("%s · %d direct links" % [assembly_root.name, links.size()]
-				if target.fastened else "INDEPENDENT")
+			var assembly_root := target.assembly_root()
+			var assembly := "INDEPENDENT"
+			if target.fastened:
+				if is_instance_valid(assembly_root):
+					var mass := "anchored" if fastening.anchored(assembly_root) else "%.2f kg" % assembly_root.mass
+					assembly = "%s · %s · %d direct links" % [assembly_root.name, mass, fastening.incident(target).size()]
+				else:
+					assembly = "INVALID · NO LIVE ROOT"
+			debug_label.text += "\nASSEMBLY  " + assembly
+		if not otis.placement.last_grab_feedback.is_empty():
+			debug_label.text += "\nMOVE  " + otis.placement.last_grab_feedback
 		debug_label.text += get_parent().environmental_diagnostics()
-		if tool != null:
-			debug_label.text += tool.system.diagnostics(aim)
+		debug_label.text += fastening.diagnostics(aim, target)
 		if otis.placement.mechanical_settings.values.debug.show_alignment_diagnostics:
 			if socket != null:
 				debug_label.text += otis.placement.alignment_diagnostics(socket, mount_issue)

@@ -21,6 +21,7 @@ var displacement := 0.0
 var stalled := false
 var specimen: PhysicsBody3D
 var specimen_start := Vector3.ZERO
+var _pending_free_load: Dictionary = {}
 
 func force_limit() -> float:
 	return FORCE_STEPS[force_index]
@@ -70,6 +71,7 @@ func reset_ram() -> void:
 	displacement = 0.0
 
 func _physics_process(delta: float) -> void:
+	measure_free_load()
 	actual_load = 0.0
 	stalled = false
 	if drive != Drive.IDLE:
@@ -139,16 +141,39 @@ func step_drive(delta: float) -> void:
 		if is_instance_valid(root) and not root.freeze and support == null:
 			var required := maxf(0.0, SPEED - root.linear_velocity.dot(axis)) * root.mass / maxf(delta, 0.0001)
 			actual_load = minf(actual_load, required)
-		if not system.anchored(body):
-			system.apply_structural_load(body, contact.get_collision_point(), axis * actual_load, true, support)
-		root = system.physics_root(body) as RigidBody3D
 		if is_instance_valid(root) and not root.freeze and support == null:
-			# The kinematic face does not shove contacts itself. The only drive
-			# on a free specimen is this explicit, force- and speed-capped impulse.
-			var delta_speed := maxf(0.0, SPEED - root.linear_velocity.dot(axis))
-			root.apply_central_impulse(axis * minf(actual_load * delta, delta_speed * root.mass))
+			# Measure the motion this impulse actually produces after the physics
+			# step. Ground contact can absorb much of the force on a free crate.
+			if actual_load > 0.0 and not system.incident(body).is_empty():
+				_pending_free_load = {"body": body, "root": root, "revision": system.topology_revision,
+					"axis": axis, "velocity": root.linear_velocity.dot(axis), "angular": root.angular_velocity,
+					"force": actual_load, "delta": delta}
+			root.apply_central_impulse(axis * (actual_load * delta))
+		elif not system.anchored(body):
+			system.apply_structural_load(body, contact.get_collision_point(), axis * actual_load, true, support)
 	elif is_equal_approx(travel, 0.0) or is_equal_approx(travel, STROKE):
 		drive = Drive.IDLE
+
+func measure_free_load() -> void:
+	if _pending_free_load.is_empty():
+		return
+	var sample := _pending_free_load
+	_pending_free_load = {}
+	if (sample.revision != system.topology_revision or not is_instance_valid(sample.body)
+			or not is_instance_valid(sample.root) or system.physics_root(sample.body) != sample.root
+			or not system.assembly_available(sample.body) or sample.root.freeze or sample.delta <= 0.0):
+		return
+	var root := sample.root as RigidBody3D
+	var axis: Vector3 = sample.axis
+	var step: float = sample.delta
+	var initial_angular_velocity: Vector3 = sample.angular
+	var force := clampf((root.linear_velocity.dot(axis) - float(sample.velocity)) * root.mass / step, 0.0, float(sample.force))
+	var angular_acceleration := (root.angular_velocity - initial_angular_velocity) / step
+	if system.load_debug:
+		print("RAM FREE revision=", sample.revision, " body=", sample.body.name,
+			" applied=", sample.force, " inertial=", force, " angular acceleration=", angular_acceleration)
+	system.last_load = force
+	system.apply_ram_inertia(sample.body, axis * force, angular_acceleration, root.angular_velocity)
 
 ## Sweep the existing compound collider a short distance in the drive
 ## direction. Only an opposing fixed contact can carry a stall reaction.

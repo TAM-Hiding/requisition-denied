@@ -24,6 +24,9 @@ var _hold_consumed := false
 var _trackball_cursor := Vector2.ZERO
 var _pending_turns: Array[Quaternion] = []
 var pickup_debug := false
+var last_grab_feedback := ""
+var _grab_system: FasteningSystem
+var _grab_revision := -1
 var mechanical_settings := MechanicalInteractionSettings.new()
 var _seating_socket: MechanicalMount
 var _seating_path: Array[Transform3D] = []
@@ -74,7 +77,7 @@ func press_drop(now: int = -1) -> void:
 	_grab_candidate = null
 	if not is_active() and (actor.equipment.held_item() == null or actor.equipment.held_item() is FasteningTool):
 		var target := actor.target_hit().get("collider") as InteractableObject
-		if is_instance_valid(target) and not target.fastened and target.mobility() != ObjectDefinition.Mobility.FIXED:
+		if is_instance_valid(target) and (target.fastened or target.mobility() != ObjectDefinition.Mobility.FIXED):
 			_grab_candidate = target
 
 func advance_drop(now: int = -1) -> void:
@@ -87,7 +90,7 @@ func advance_drop(now: int = -1) -> void:
 		begin_world(_grab_candidate)
 	elif not is_active():
 		if actor.equipped_tool() != null:
-			grab_feedback.emit("Aim at a loose workpiece and hold G.")
+			report_grab("Aim at movable stock or a free assembly and hold G.")
 		else:
 			begin()
 
@@ -124,32 +127,67 @@ func begin() -> bool:
 	valid = false
 	return true
 
-func begin_world(item: InteractableObject) -> bool:
-	if (input_suspended or is_active() or not is_instance_valid(item)
-			or item.fastened or item.mobility() == ObjectDefinition.Mobility.FIXED
-			or item.state != InteractableObject.State.WORLD or item.freeze
-			or actor.target_hit().get("collider") != item):
+func report_grab(message: String) -> void:
+	last_grab_feedback = message
+	if not message.is_empty():
+		grab_feedback.emit(message)
+
+func begin_world(target: InteractableObject) -> bool:
+	if input_suspended or is_active():
+		report_grab("Finish the current interaction before moving another object.")
 		return false
-	var clearance := PlacementClearance.new()
+	if not is_instance_valid(target) or actor.target_hit().get("collider") != target:
+		report_grab("The target is out of reach or sight.")
+		return false
+	var root_body := target.assembly_root()
+	if not is_instance_valid(root_body):
+		report_grab("Invalid assembly state. No live physics root.")
+		return false
+	var item := root_body as InteractableObject
+	if item == null or item.mobility() == ObjectDefinition.Mobility.FIXED:
+		report_grab("The assembly is anchored." if target.fastened else "The object is fixed.")
+		return false
+	if item.state != InteractableObject.State.WORLD or item.freeze:
+		report_grab("Invalid assembly state. The physics root is unavailable." if target.fastened
+			else "The object's physics body is unavailable.")
+		return false
+
+	var details := PackedStringArray()
+	if target.fastened:
+		details.append("Connected assembly · %.2f kg." % item.mass)
 	var supported := item.mass > lift_capacity()
+	if supported:
+		details.append("Lift capacity exceeded · %.2f kg / %.2f kg. Drag only." % [item.mass, lift_capacity()])
+	var clearance := PlacementClearance.new()
+	if not clearance.configure(item):
+		details.append("Pickup clearance is unavailable for this collision shape.")
+		report_grab(" ".join(details))
+		return false
+	var pose := item.global_transform
+	# The player is part of the clearance volume. For overweight objects,
+	# diagnose the lift path separately while retaining the supported drag.
+	if not supported or not clearance.clear(pose):
+		var recovered := clearance.pickup_pose(pose, pickup_debug, actor.camera.global_position - pose.origin)
+		var obstructed := not clearance.physically_clear(recovered)
+		if obstructed:
+			details.append("Pickup path obstructed by Otis. Step back and try again."
+				if not clearance.clear(recovered, 2, -PlacementClearance.RELEASE_MARGIN)
+				else "Pickup path obstructed by nearby geometry.")
+			if not supported:
+				report_grab(" ".join(details))
+				return false
+		if not supported:
+			pose = recovered
+	_resting_pickup = false
 	if not supported:
-		if not clearance.configure(item):
-			return false
-		var pose := clearance.pickup_pose(item.global_transform, pickup_debug,
-			actor.camera.global_position - item.global_position)
 		_resting_pickup = not clearance.clear(pose)
-		if _resting_pickup and not clearance.physically_clear(pose):
-			_resting_pickup = false
-			grab_feedback.emit("The load has no clear pickup path.")
-			return false
 		item.freeze = true
 		item.global_transform = pose
 		item.state = InteractableObject.State.CARRIED
 		item.support_carrier = actor
 		_clearance = clearance
 	else:
-		# Keep a supported drag planar even with asymmetric compound contacts.
-		# Restore the object's ordinary rotation policy on release.
+		# Jolt handles contacts during the supported drag.
 		_supported_was_locked = item.lock_rotation
 		item.lock_rotation = true
 		item.angular_velocity = Vector3.ZERO
@@ -161,6 +199,8 @@ func begin_world(item: InteractableObject) -> bool:
 	_world_anchor = null
 	_resume_offset = Vector3.ZERO
 	_grab = item
+	_grab_system = item.fastening_system
+	_grab_revision = _grab_system.topology_revision if _grab_system != null else -1
 	_supported = supported
 	distance = clampf((item.global_position - actor.camera.global_position).dot(-actor.camera.global_basis.z),
 		minimum_distance, maximum_distance)
@@ -168,7 +208,18 @@ func begin_world(item: InteractableObject) -> bool:
 	if actor.tool_aiming:
 		pin_workpiece()
 	valid = not _resting_pickup
+	report_grab(" ".join(details))
 	return true
+
+func refresh_assembly_grab() -> bool:
+	if not is_instance_valid(_grab_system) or _grab_revision == _grab_system.topology_revision:
+		return true
+	_grab_revision = _grab_system.topology_revision
+	if _grab.assembly_root() == _grab and (_supported or _clearance.configure(_grab)):
+		return true
+	cancel()
+	report_grab("Assembly topology changed. Aim again to move the new group.")
+	return false
 
 func pin_workpiece() -> void:
 	if is_grabbing() and not _supported and not is_seating():
@@ -182,10 +233,10 @@ func resume_workpiece() -> void:
 	_world_anchor = null
 
 func fastening_workpiece() -> InteractableObject:
-	return _grab if is_grabbing() and not _supported and not is_seating() else null
+	return _grab if is_grabbing() and not _grab.fastened and not _supported and not is_seating() else null
 
 func can_handoff_workpiece(item: InteractableObject) -> bool:
-	return _grab == item and not _supported and not is_seating() and _clearance.clear(item.global_transform)
+	return fastening_workpiece() == item and _clearance.clear(item.global_transform)
 
 func handoff_workpiece(item: InteractableObject) -> bool:
 	if not can_handoff_workpiece(item):
@@ -196,20 +247,24 @@ func handoff_workpiece(item: InteractableObject) -> bool:
 func _release_grab() -> void:
 	var item := _grab
 	_grab = null
+	_grab_system = null
+	_grab_revision = -1
 	_world_anchor = null
 	_resume_offset = Vector3.ZERO
 	item.state = InteractableObject.State.WORLD
 	item.support_carrier = null
 	item.move_speed_scale = 1.0
-	if _supported:
-		item.lock_rotation = _supported_was_locked
-		item.linear_velocity = Vector3(0, item.linear_velocity.y, 0)
-	else:
-		item.lock_rotation = false
-		item.freeze = false
-		item.linear_velocity = Vector3.ZERO
-		item.angular_velocity = Vector3.ZERO
-	item.sleeping = false
+	# Do not change physics now owned by a replacement compound root.
+	if item.assembly_root() == item:
+		if _supported:
+			item.lock_rotation = _supported_was_locked
+			item.linear_velocity = Vector3(0, item.linear_velocity.y, 0)
+		else:
+			item.lock_rotation = false
+			item.freeze = false
+			item.linear_velocity = Vector3.ZERO
+			item.angular_velocity = Vector3.ZERO
+		item.sleeping = false
 	_supported = false
 	_resting_pickup = false
 	actor.equipment.presentation.request_pose(HeldItemPresentation.Pose.NORMAL)
@@ -281,6 +336,8 @@ func target_position() -> Vector3:
 	return actor.camera.to_global(Vector3.FORWARD * distance + _resume_offset)
 
 func update_preview(delta: float) -> void:
+	if is_grabbing() and not refresh_assembly_grab():
+		return
 	if is_seating():
 		advance_seating(delta)
 		return
@@ -445,6 +502,8 @@ func confirm() -> bool:
 	if input_suspended or is_seating():
 		return false
 	if is_grabbing():
+		if not refresh_assembly_grab():
+			return false
 		if not _supported and not _clearance.clear(_grab.global_transform):
 			valid = false
 			grab_feedback.emit("Placement blocked.")

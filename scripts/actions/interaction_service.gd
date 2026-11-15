@@ -17,7 +17,7 @@ func request(action: StringName, actor: Node3D, camera: Camera3D,
 		target: InteractableObject, reach: float, knowledge: PlayerKnowledge) -> Dictionary:
 	if not permitted(actor, camera, target, reach):
 		return {"ok": false, "message": "Object is no longer within reach or sight."}
-	if not target.query_actions().has(action):
+	if action != &"move" and not target.query_actions().has(action):
 		return {"ok": false, "message": "Action unavailable."}
 	if action == &"remove" and target is MechanicalComponent:
 		if actor is OtisController and actor.placement.is_active():
@@ -31,7 +31,8 @@ func request(action: StringName, actor: Node3D, camera: Camera3D,
 			return {"ok": false, "message": "Place or cancel the current object first."}
 		if action == &"pick_up":
 			return actor.equipment.pick_up(target)
-		return {"ok": true} if actor.placement.begin_world(target) else {"ok": false, "message": "Cannot move this object from here."}
+		var accepted: bool = (actor as OtisController).placement.begin_world(target)
+		return {"ok": accepted, "message": actor.placement.last_grab_feedback}
 	if action != &"inspect":
 		return {"ok": false, "message": "Action unavailable."}
 	if knowledge == null:

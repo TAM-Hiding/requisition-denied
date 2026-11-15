@@ -185,8 +185,11 @@ func run() -> void:
 		and reopened.values.controls.removal_seconds == 7, "Removal preferences round-trip through JSON")
 	DirAccess.remove_absolute(path)
 	await heavy_stock_drag(supply, actor)
+	await pickup_diagnostics(facility, supply, actor, system)
 	await hydraulic_split(facility, supply, actor, system)
 	facility.queue_free()
+	await frames()
+	await compare_ram_branches()
 	await process_frame
 	print("RD-009: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures else 0)
@@ -299,3 +302,152 @@ func hydraulic_split(facility: Node3D, supply: ScrapSupply, actor: OtisControlle
 	var result := service.request(&"move", actor, actor.camera, detached, actor.interaction_distance, actor.knowledge)
 	check(result.ok and actor.placement.is_grabbing(), "The live Move action can acquire the fractured part")
 	actor.placement.cancel()
+
+func compare_ram_branches() -> void:
+	for count in 3:
+		var chamber = preload("res://scenes/facility.tscn").instantiate()
+		root.add_child(chamber)
+		var crate := chamber.get_node("Crate") as InteractableObject
+		var system: FasteningSystem = chamber.fastening
+		var ram: StructuralTestRam = chamber.test_ram
+		var supply: ScrapSupply = chamber.scrap_supply
+		crate.global_position = Vector3(-2.5, 0.65, -0.5)
+		crate.linear_velocity = Vector3.ZERO
+		system.sync_body_transform(crate)
+		await frames(5)
+		var bolts: Array[InstalledFastener] = []
+		var parts: Array[InteractableObject] = []
+		for index in count:
+			var stock := supply.dispense(0)
+			parts.append(stock)
+			stock.gravity_scale = 0.0
+			stock.global_position = crate.global_position + Vector3(index * 0.055, 0.08, 0.661 + index * 0.022)
+			var origin := stock.global_position + Vector3(0.035 * index, 0, 0.06)
+			system.sync_body_transform(stock)
+			await frames(2)
+			var bolt := system.create_round(FasteningTool.GRADES[0])
+			var issue := system.install(bolt, origin, Vector3.FORWARD, 0.5)
+			check(issue.is_empty(), "Side branch installs: " + issue)
+			bolts.append(bolt)
+			await frames()
+		var start := crate.global_position.x
+		ram.travel = 1.797
+		ram.face.position.x = ram.travel
+		ram.set_force_index(4)
+		ram.set_drive(StructuralTestRam.Drive.EXTEND)
+		var peaks := PackedFloat64Array()
+		peaks.resize(count)
+		for step in 10:
+			await frames(1)
+			for i in count:
+				peaks[i] = maxf(peaks[i], bolts[i].load_estimate)
+		var travel := crate.global_position.x - start
+		ram.set_drive(StructuralTestRam.Drive.IDLE)
+		print("RD-009 comparative ram · %d attached · peak loads %s · crate moved %.3f m" % [count, peaks, travel])
+		check(travel > 0.005 and ram.specimen == crate, "Ram contacts and drives the unanchored crate")
+		check(bolts.all(func(bolt: InstalledFastener) -> bool: return bolt.state == InstalledFastener.State.INSTALLED),
+			"At 800 units, the %d-part side branch survives ordinary ram contact" % count)
+		if count == 2 and bolts[0].state == InstalledFastener.State.INSTALLED:
+			check(bolts[0].b == crate and bolts[1].b == parts[0] and peaks[0] > peaks[1] and peaks[1] > 0.0,
+				"The two-part graph loads both links and the parent carries more")
+			await move_split_cluster(chamber, system, crate, parts, bolts)
+		chamber.queue_free()
+		await frames()
+
+func move_split_cluster(chamber: Node3D, system: FasteningSystem, crate: InteractableObject,
+		parts: Array[InteractableObject], bolts: Array[InstalledFastener]) -> void:
+	system.apply_ram_inertia(crate, Vector3.ZERO, Vector3.UP)
+	check(bolts[0].load_estimate > 0.0 and bolts[1].load_estimate > 0.0
+		and bolts[0].state == InstalledFastener.State.INSTALLED, "Angular acceleration adds load to the eccentric branch")
+	# A high, explicit branch load is still a real overload.
+	system.apply_structural_load(crate, bolts[0].head(), Vector3.RIGHT * 110)
+	var body := system.physics_root(parts[1]) as InteractableObject
+	check(bolts[0].state == InstalledFastener.State.FAILED and bolts[1].state == InstalledFastener.State.INSTALLED
+		and body != crate and parts[0].assembly_root() == body and parts[1].assembly_root() == body,
+		"Overload leaves a free cluster with both parts and the surviving internal bolt")
+	var actor := chamber.get_node("Otis") as OtisController
+	var leaf := parts[0] if body == parts[1] else parts[1]
+	var diagnostics := system.diagnostics({}, leaf)
+	check(diagnostics.contains("EXPLICIT LOAD") and diagnostics.contains("Group %d" % bolts[1].group_id),
+		"Structural diagnostics show the surviving link and the overload that split the cluster")
+	var exposed_edge := -0.13 if leaf == parts[0] else 0.13
+	actor.global_position = Vector3(leaf.global_position.x + exposed_edge, 0.02, leaf.global_position.z + 1.45)
+	await frames(5)
+	actor.camera.look_at(leaf.global_position + Vector3(exposed_edge, 0, 0))
+	var move := InteractionService.new().request(&"move", actor, actor.camera, leaf, actor.interaction_distance, actor.knowledge)
+	check(move.ok and body.state == InteractableObject.State.CARRIED and leaf.fastened
+		and move.message.contains("Connected assembly · 6.78 kg"), "Move on the follower grabs the whole 6.78 kg cluster: " + move.message)
+	if not move.ok:
+		return
+	check(not system.remove(bolts[1]), "A held cluster keeps its internal connection during movement")
+	var relative := body.to_local(leaf.global_position)
+	var start := body.global_position
+	actor.camera.look_at(leaf.global_position + Vector3(0.4, 0.4, 0.25))
+	await frames(30)
+	check(body.global_position.distance_to(start) > 0.1 and body.to_local(leaf.global_position).is_equal_approx(relative),
+		"The root and follower travel together as one collision body")
+	check(actor.placement.confirm() and bolts[1].state == InstalledFastener.State.INSTALLED and not body.freeze,
+		"Confirm restores dynamics without removing the internal bolt")
+	body.global_position = Vector3(2.7, 0.04, 2.55)
+	body.gravity_scale = 1.0
+	system.sync_body_transform(body)
+	actor.global_position = Vector3(2.7, 0.02, 3.7)
+	var lift := actor.placement.lift_capacity()
+	actor.chassis.set_contribution(&"test_lift", {AndroidChassis.Attribute.LIFT_KG: 5.0 - lift})
+	await frames(6)
+	actor.camera.look_at(body.global_position)
+	actor.placement.press_drop(0)
+	actor.placement.release_drop(PrecisionPlacement.HOLD_THRESHOLD_USEC)
+	check(actor.placement.is_supported_grab() and actor.placement.last_grab_feedback.contains("6.78 kg / 5.00 kg")
+		and bolts[1].state == InstalledFastener.State.INSTALLED, "Hold G drags a free cluster above lift capacity")
+	actor.placement.cancel()
+
+func pickup_diagnostics(chamber: Node3D, supply: ScrapSupply, actor: OtisController, system: FasteningSystem) -> void:
+	var stock := supply.dispense(0)
+	check(stock != null, "Dispense the pickup-clearance bracket")
+	if stock == null:
+		return
+	var service := InteractionService.new()
+	actor.global_position = Vector3(2.0, 0.02, 2.0)
+	await frames(5)
+	stock.gravity_scale = 0.0
+	stock.global_position = actor.global_position + Vector3(0.0, 0.80, -0.25)
+	system.sync_body_transform(stock)
+	actor.camera.look_at(stock.global_position)
+	var obstruction := service.request(&"move", actor, actor.camera, stock, actor.interaction_distance, actor.knowledge)
+	check(not obstruction.ok and obstruction.message.contains("Pickup path obstructed by Otis")
+		and not obstruction.message.contains("Lift capacity"), "Player clearance rejection names Otis separately from mass")
+	stock.mass = 45.0
+	var combined := service.request(&"move", actor, actor.camera, stock, actor.interaction_distance, actor.knowledge)
+	check(combined.ok and actor.placement.is_supported_grab() and combined.message.contains("Lift capacity exceeded")
+		and combined.message.contains("Pickup path obstructed by Otis"), "Capacity and obstruction can both be reported during drag")
+	actor.placement.cancel()
+	stock.fastened = true
+	var stale := service.request(&"move", actor, actor.camera, stock, actor.interaction_distance, actor.knowledge)
+	check(not stale.ok and stale.message.contains("Invalid assembly state"), "A stale member reports invalid topology")
+	stock.fastened = false
+	stock.queue_free()
+	await frames(2)
+
+	var crate := chamber.get_node("Crate") as InteractableObject
+	crate.mass = 45.0
+	crate.global_position = Vector3(2.4, 0.65, 2.4)
+	system.sync_body_transform(crate)
+	var calibration := chamber.get_node_or_null("TestWeight") as InteractableObject
+	if calibration == null:
+		check(false, "The calibration block is available")
+		return
+	calibration.global_position = crate.global_position + Vector3(0, 0.78, 0)
+	system.sync_body_transform(calibration)
+	actor.global_position = Vector3(2.4, 0.02, 3.85)
+	await frames(10)
+	var lift := actor.chassis.effective(AndroidChassis.Attribute.LIFT_KG)
+	actor.chassis.set_contribution(&"test_lift", {AndroidChassis.Attribute.LIFT_KG: 36.75 - lift})
+	actor.camera.look_at(crate.global_position)
+	var heavy := service.request(&"move", actor, actor.camera, crate, actor.interaction_distance, actor.knowledge)
+	check(heavy.ok and actor.placement.is_supported_grab() and heavy.message.contains("45.00 kg / 36.75 kg")
+		and not heavy.message.contains("53.00") and not calibration.fastened,
+		"An unbolted 8 kg block does not count toward the crate's manipulation mass")
+	actor.placement.cancel()
+	actor.chassis.set_contribution(&"test_lift", {})
+	crate.mass = crate.definition.mass_kg
