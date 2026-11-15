@@ -70,4 +70,7 @@ func _integrate_forces(body: PhysicsDirectBodyState3D) -> void:
 	body.linear_velocity = Vector3(horizontal.x, body.linear_velocity.y, horizontal.z)
 
 func inspection_information() -> Dictionary:
-	return definition.inspection_information()
+	var information := definition.inspection_information()
+	if fastened or mobility() != ObjectDefinition.Mobility.FIXED:
+		information.description += "\n\nFasteners: " + ("Connected assembly" if fastened else "Independent")
+	return information

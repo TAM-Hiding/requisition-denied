@@ -583,7 +583,12 @@ func rebuild() -> void:
 			body.reparent(parent)
 		body.collision_layer = saved.layer
 		body.collision_mask = saved.mask
-		body.freeze = saved.frozen
+		# The island owns the follower freeze. A loose world body gets its
+		# physics mode from its current mobility when ownership is handed back.
+		if body is InteractableObject and body.state == InteractableObject.State.WORLD:
+			body.freeze = anchored(body)
+		else:
+			body.freeze = saved.frozen
 		sync_body_transform(body)
 		body.sleeping = false
 		if velocities.has(body):

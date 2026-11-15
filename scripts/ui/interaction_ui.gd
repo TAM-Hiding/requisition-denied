@@ -220,6 +220,12 @@ func _physics_process(delta: float) -> void:
 	debug_label.text += "\nEQUIPMENT POSE  " + HeldItemPresentation.Pose.keys()[otis.equipment.presentation.requested_pose]
 
 	if debug_visible:
+		if target != null:
+			var fastening: FasteningSystem = get_parent().fastening
+			var links := fastening.incident(target)
+			var assembly_root := fastening.physics_root(target)
+			debug_label.text += "\nASSEMBLY  " + ("%s · %d direct links" % [assembly_root.name, links.size()]
+				if target.fastened else "INDEPENDENT")
 		debug_label.text += get_parent().environmental_diagnostics()
 		if tool != null:
 			debug_label.text += tool.system.diagnostics(aim)
