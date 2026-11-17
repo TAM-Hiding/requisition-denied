@@ -1,0 +1,16 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/character/wayfarer_geometry.gd" id="1"]
+
+[node name="Forearm" type="Node3D"]
+script = ExtResource("1")
+section = &"forearm"
+
+[node name="ElbowConnection" type="Marker3D" parent="."]
+position = Vector3(0, 0, 0)
+
+[node name="WristConnection" type="Marker3D" parent="."]
+position = Vector3(0, -0.31, 0)
+
+[node name="ForearmAccessoryMount" type="Marker3D" parent="."]
+position = Vector3(0, -0.15, -0.08)
