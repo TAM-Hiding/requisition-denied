@@ -50,3 +50,9 @@ Use metres and unit scale. The assembled character's origin is at floor level, w
 Each definition under `scenes/character` declares its ID, category, interface, scene, sockets and optional cosmetic label. The service forearm replaces either arm through `replace_forearm(side_index, definition)`, using indices 0 for left and 1 for right. The replacement must match the current wrist transform. The same hand and tool socket survive the swap. There is no customization UI. The rear and waist mounts can accept accessories and have no inventory role yet.
 
 First person hides the body and uses the established camera-relative item presentation. Inspection places a render-only copy of the equipped item at the right hand’s `ToolAlignment`. The real equipment retains its gameplay transform and state, including Uni-Bolt sight alignment and workpiece stabilization while aiming. Generic items use their visual origin for the grip, while the Uni-Bolt uses its modeled handle offset. The manipulation pose is a general reach pose and does not track individual contact points.
+
+## Revision A
+
+![Front detail of the corrected left and right manipulators](wayfarer-hands-revision-a.png)
+
+The mirrored thumb joints and finger order distinguish the left and right manipulators. Both hands retain the original wrist and grip transforms. Future third-person animation cleanup will decouple the projected Uni-Bolt from head pitch.

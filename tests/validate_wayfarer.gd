@@ -32,6 +32,7 @@ func run() -> void:
 	check(rig.find_children("*", "CollisionObject3D", true, false).is_empty(),
 		"The visual rig adds no gameplay collision bodies")
 	check(not rig.visible and actor.camera.is_current(), "The first-person camera is clear on startup")
+	check_handedness(rig)
 	var before := actor.global_transform
 	var look := actor.camera.transform
 	var chassis := actor.chassis
@@ -73,3 +74,31 @@ func run() -> void:
 	await process_frame
 	print("RD-010: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures else 0)
+
+
+func check_handedness(rig: WayfarerRig) -> void:
+	var left: Node3D = rig.limbs[0].hand
+	var right: Node3D = rig.limbs[1].hand
+	var left_thumb := left.get_node("ThumbBase") as MeshInstance3D
+	var right_thumb := right.get_node("ThumbBase") as MeshInstance3D
+	var left_tip := left.get_node("ThumbTip") as MeshInstance3D
+	var right_tip := right.get_node("ThumbTip") as MeshInstance3D
+	check(left_thumb.position.x > 0.0 and right_thumb.position.x < 0.0
+		and absf(rig.to_local(left_thumb.global_position).x) < absf(rig.to_local(left.global_position).x)
+		and absf(rig.to_local(right_thumb.global_position).x) < absf(rig.to_local(right.global_position).x),
+		"The left and right thumbs face inward in neutral stance")
+	check(is_equal_approx(left_thumb.position.x, -right_thumb.position.x)
+		and is_equal_approx(left_tip.rotation.z, -right_tip.rotation.z)
+		and (left_tip.basis * Vector3.DOWN).x < 0.0 and (right_tip.basis * Vector3.DOWN).x > 0.0,
+		"Thumb links mirror across the wrists and curl across their own palms")
+	for hand in [left, right]:
+		var thumb := hand.get_node("ThumbBase") as MeshInstance3D
+		var index_finger := hand.get_node("IndexFinger") as MeshInstance3D
+		var little_finger := hand.get_node("LittleFinger") as MeshInstance3D
+		var grip := hand.get_node("PrimaryGrip") as Marker3D
+		var back := hand.get_node("BackPlate") as MeshInstance3D
+		check(index_finger.position.x * thumb.position.x > 0.0
+			and little_finger.position.x * thumb.position.x < 0.0
+			and index_finger.position.y < 0.0 and (index_finger.basis * Vector3.DOWN).dot(Vector3.DOWN) > 0.9
+			and index_finger.position.z < 0.0 and grip.position.z < 0.0 and back.position.z > 0.0,
+			"Finger order is handed and the palm faces its forward grip")
