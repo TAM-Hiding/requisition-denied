@@ -171,14 +171,14 @@ ram and preserves damage. F5–F7 remain available as development shortcuts.
 | --- | --- |
 | Left mouse | Install or remove an individual fastener with the tool equipped |
 | Right mouse (hold) | Aim down sights and pin a suspended workpiece at its current world pose |
-| R | Switch INSTALL / REMOVE |
+| R | Activate the configured removal behavior |
 | G (hold / tap) | Acquire a loose workpiece / place the grabbed workpiece while carrying the Uni-Bolt |
 | 1 | Stow the equipped Uni-Bolt or retrieve it from storage, including during a world grab |
 | X | Drop the equipped Uni-Bolt using the ordinary collision-safe drop check |
 | F5 | Extend or retract the ram |
 | F6 / Shift+F6 | Increase or decrease the ram force limit |
 | F7 | Reset and retract the ram |
-| F8 / F9 | Cycle test grades / refill the selected grade while equipped |
+| V / B | Cycle test grades / refill the selected grade while equipped |
 
 To fasten while holding a part, equip the tool and hold **G** on a loose
 plate or angle. You can also stow the tool with **1**, start manipulating a
@@ -237,6 +237,20 @@ test loads. A committed bolt that overloads reports its failure in the HUD.
 Ordinary collisions do not accumulate fastener damage. Compound islands can
 be pushed physically. To precision-grab an individual member, detach it
 first. Fastening data and ammunition remain session-local.
+
+## Development scrap rack
+
+Press **E** at the rack on the southwest wall. Choose a stock profile and
+press **Dispense One**. Remove the part from the marked pad before dispensing
+another. The rack offers 27 rigid steel variants with dimensions, calculated
+mass and profile icons. Round tubing uses 12 convex wall segments. Use
+**Settings → Development → Clear Loose Scrap** twice to clear loose dispensed
+stock while preserving held pieces, bolted assemblies and permanent equipment.
+
+In **Settings → Controls**, choose Toggle, Timed or Hold for **R**. Timed is
+the default at five seconds. A successful removal restarts the timer and an
+open terminal pauses it. Save to keep the setting across sessions. **V**
+cycles the grade and **B** refills test ammunition.
 
 ## Structure
 

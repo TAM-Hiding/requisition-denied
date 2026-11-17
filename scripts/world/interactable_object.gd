@@ -5,6 +5,7 @@ enum State { WORLD, HELD, STOWED, MOVING, CARRIED }
 @export var definition: ObjectDefinition
 var state: State = State.WORLD
 var fastened := false
+var fastening_system: FasteningSystem
 var support_carrier: CharacterBody3D
 var _mobility_override: int = -1
 var move_goal: Vector3
@@ -43,6 +44,13 @@ func mobility_name() -> String:
 func state_name() -> String:
 	return State.keys()[state]
 
+func assembly_root() -> PhysicsBody3D:
+	if not fastened:
+		return self
+	if not is_instance_valid(fastening_system):
+		return null
+	return fastening_system.connected_root(self)
+
 func query_actions() -> Array[StringName]:
 	var actions: Array[StringName] = []
 	if definition == null or state not in [State.WORLD, State.MOVING]:
@@ -51,11 +59,11 @@ func query_actions() -> Array[StringName]:
 	for action in definition.available_actions:
 		if action not in [&"pick_up", &"move", &"stow", &"lift"]:
 			actions.append(action)
-	if state == State.WORLD and not fastened:
-		if mobility() == ObjectDefinition.Mobility.CARRYABLE:
+	if state == State.WORLD and mobility() != ObjectDefinition.Mobility.FIXED:
+		var root_body := assembly_root() as InteractableObject
+		if not fastened and mobility() == ObjectDefinition.Mobility.CARRYABLE:
 			actions.append(&"pick_up")
-			actions.append(&"move")
-		elif mobility() == ObjectDefinition.Mobility.MOVABLE:
+		if root_body != null and root_body.state == State.WORLD and root_body.mobility() != ObjectDefinition.Mobility.FIXED:
 			actions.append(&"move")
 	return actions
 
@@ -70,4 +78,7 @@ func _integrate_forces(body: PhysicsDirectBodyState3D) -> void:
 	body.linear_velocity = Vector3(horizontal.x, body.linear_velocity.y, horizontal.z)
 
 func inspection_information() -> Dictionary:
-	return definition.inspection_information()
+	var information := definition.inspection_information()
+	if fastened or mobility() != ObjectDefinition.Mobility.FIXED:
+		information.description += "\n\nFasteners: " + ("Connected assembly" if fastened else "Independent")
+	return information

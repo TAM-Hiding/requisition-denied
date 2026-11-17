@@ -5,6 +5,7 @@ signal active_changed(active: bool)
 var active := false
 var screen_ui: TerminalDisplay
 var ram_panel: RamControlPanel
+var scrap_panel: ScrapPanel
 var camera: Camera3D
 var _otis: OtisController
 var _target: InteractableObject
@@ -41,6 +42,13 @@ func configure_ram(otis: OtisController, target: InteractableObject, ram: Struct
 	ram_panel = RamControlPanel.new()
 	ram_panel.ram = ram
 	_display.add_child(ram_panel)
+
+func configure_scrap(otis: OtisController, target: InteractableObject, supply: ScrapSupply,
+		surface: MeshInstance3D, view_anchor: Marker3D, display: SubViewport) -> void:
+	configure_camera(otis, target, surface, view_anchor, display)
+	scrap_panel = ScrapPanel.new()
+	scrap_panel.supply = supply
+	_display.add_child(scrap_panel)
 
 func configure_camera(otis: OtisController, target: InteractableObject,
 		surface: MeshInstance3D, view_anchor: Marker3D, display: SubViewport) -> void:
@@ -81,8 +89,10 @@ func enter() -> bool:
 	camera.make_current()
 	if screen_ui != null:
 		screen_ui.set_active(true)
-	else:
+	elif ram_panel != null:
 		ram_panel.buttons["STOP"].grab_focus()
+	else:
+		scrap_panel.stock.grab_focus()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_transition = create_tween().set_parallel().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	_transition.tween_property(camera, "global_transform", _view_anchor.global_transform, 0.28)
@@ -104,6 +114,7 @@ func leave() -> void:
 	_pressed_buttons.clear()
 	if screen_ui != null:
 		screen_ui.set_active(false)
+		screen_ui.settings_panel.cleanup_pending = false
 	_otis.placement.set_input_suspended(false)
 	_otis.camera.make_current()
 	_otis.controls_enabled = true

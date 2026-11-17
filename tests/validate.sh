@@ -25,4 +25,5 @@ run_check --headless --path . --script tests/validate_physics_followup.gd
 run_check --headless --path . --script tests/validate_android_chassis.gd
 run_check --headless --path . --script tests/validate_mechanical_assembly.gd
 run_check --headless --path . --script tests/validate_universal_fastening.gd
+run_check --headless --path . --script tests/validate_scrap_stock.gd
 run_check --headless --path . --quit-after 120

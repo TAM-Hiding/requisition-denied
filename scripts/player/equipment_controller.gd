@@ -65,6 +65,8 @@ func stow() -> Dictionary:
 	if _stored.size() >= storage_capacity or _stored.has(_held):
 		return result(false, "Equipment storage is full.")
 	var item := _held
+	if item is FasteningTool:
+		item.update_removal(0.0, false)
 	_stored.append(item)
 	_held = null
 	presentation.clear()

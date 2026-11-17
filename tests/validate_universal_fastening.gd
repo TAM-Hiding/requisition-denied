@@ -102,6 +102,14 @@ func concurrent_work() -> void:
 	await frames(16)
 	check(actor.tool_aiming and actor.camera.fov < actor.camera_fov and panel.global_transform.is_equal_approx(pinned),
 		"ADS narrows FOV while the world pose remains pinned during camera movement")
+	var original_position := actor.global_position
+	actor.global_position += Vector3.RIGHT * 0.3
+	actor.camera.look_at(panel.global_position)
+	actor.placement.update_preview(0.12)
+	check(actor.placement.is_grabbing() and panel.global_transform.is_equal_approx(pinned),
+		"Repositioning Otis during ADS leaves the workpiece at its world pose")
+	actor.global_position = original_position
+	actor.camera.look_at(panel.global_position + Vector3(0.12, 0.04, 0))
 	var candidate := system.probe(actor.camera.global_position, -actor.camera.global_basis.z, 3.0, actor)
 	check(candidate.issue.is_empty() and candidate.a == panel and candidate.b == backing,
 		"Ray targets the actual held workpiece and its backing, never the gun or Otis")
@@ -391,6 +399,7 @@ func action(name: StringName, pressed := true) -> InputEventAction:
 	return event
 
 func repeated_construction() -> void:
+	tool.configure_removal("Toggle", 5.0)
 	var ui := facility.get_node("InteractionUI")
 	var placement := actor.placement
 	var backing := piece("CycleBacking", Vector3(3.3, 1.4, 4.65), Vector3(0.70, 0.70, 0.20), 8.0)

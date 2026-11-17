@@ -40,6 +40,8 @@ func compatible(body: PhysicsBody3D, actor: PhysicsBody3D = null) -> bool:
 	if not usable_body(body) or body.has_meta(&"no_fasteners"):
 		return false
 	if body is InteractableObject:
+		if body.fastened and not assembly_available(body):
+			return false
 		var controlled: bool = actor is OtisController and body.state == InteractableObject.State.CARRIED \
 			and body.support_carrier == actor
 		return (body.state == InteractableObject.State.WORLD or controlled) and not body is FasteningTool \
@@ -332,12 +334,16 @@ func target_bolt(origin: Vector3, direction: Vector3, reach: float, actor: Physi
 				nearest = bolt
 	return nearest
 
+func assembly_available(body: PhysicsBody3D) -> bool:
+	var root := physics_root(body) as InteractableObject
+	return root == null or root.state == InteractableObject.State.WORLD
+
 func remove(bolt: InstalledFastener) -> bool:
 	reconcile()
 	if bolt == null or bolt.state != InstalledFastener.State.INSTALLED:
 		return false
 	var group := between(bolt.a, bolt.b)
-	if group == null or not group.bolts.has(bolt):
+	if group == null or not group.bolts.has(bolt) or not assembly_available(group.a):
 		return false
 	unlink(group, bolt, false)
 	bolt.a = null
@@ -371,6 +377,10 @@ func discard_visual(bolt: InstalledFastener) -> void:
 
 func physics_root(body: PhysicsBody3D) -> PhysicsBody3D:
 	return _roots.get(body, body)
+
+func connected_root(body: PhysicsBody3D) -> PhysicsBody3D:
+	var root: PhysicsBody3D = _roots.get(body)
+	return root if usable_body(root) else null
 
 func incident(body: PhysicsBody3D) -> Array[FastenerConnection]:
 	return connections.filter(func(edge: FastenerConnection) -> bool: return edge.a == body or edge.b == body)
@@ -456,12 +466,18 @@ func overload_group(group: FastenerConnection, point: Vector3, force: Vector3, s
 ## Free assemblies are accelerated by the ram. A branch transmits the
 ## inertia of its downstream bodies, rather than the full contact force.
 ## The centroid approximates the lever arm; cycles share no inferred load.
-func apply_ram_inertia(body: PhysicsBody3D, force: Vector3) -> void:
+func apply_ram_inertia(body: PhysicsBody3D, force: Vector3, angular_acceleration := Vector3.ZERO,
+		angular_velocity := Vector3.ZERO) -> void:
 	var root := physics_root(body) as RigidBody3D
-	if root == null or root.freeze or force.is_zero_approx():
+	if root == null or root.freeze:
 		return
 	var failures_before := failed.size()
 	var topology_changed := false
+	var center := root.global_position
+	if not angular_acceleration.is_zero_approx() or not angular_velocity.is_zero_approx():
+		var state := PhysicsServer3D.body_get_direct_state(root.get_rid())
+		if state != null:
+			center = root.to_global(state.center_of_mass_local)
 	var queue: Array[PhysicsBody3D] = [body]
 	var visited := {body: true}
 	while not queue.is_empty():
@@ -474,7 +490,10 @@ func apply_ram_inertia(body: PhysicsBody3D, force: Vector3) -> void:
 			visited[next] = true
 			if branch.is_empty():
 				continue
-			if overload_group(group, branch.center, force * (float(branch.mass) / root.mass), "RAM INERTIA"):
+			var offset: Vector3 = branch.center - center
+			var acceleration := force / root.mass + angular_acceleration.cross(offset) \
+				+ angular_velocity.cross(angular_velocity.cross(offset))
+			if overload_group(group, branch.center, acceleration * float(branch.mass), "RAM INERTIA"):
 				topology_changed = true
 			else:
 				queue.append(next)
@@ -583,7 +602,12 @@ func rebuild() -> void:
 			body.reparent(parent)
 		body.collision_layer = saved.layer
 		body.collision_mask = saved.mask
-		body.freeze = saved.frozen
+		# The island owns the follower freeze. A loose world body gets its
+		# physics mode from its current mobility when ownership is handed back.
+		if body is InteractableObject and body.state == InteractableObject.State.WORLD:
+			body.freeze = anchored(body)
+		else:
+			body.freeze = saved.frozen
 		sync_body_transform(body)
 		body.sleeping = false
 		if velocities.has(body):
@@ -595,6 +619,7 @@ func rebuild() -> void:
 	for body in _roots:
 		if is_instance_valid(body) and body is InteractableObject:
 			body.fastened = false
+			body.fastening_system = null
 	_followers.clear()
 	_root_masses.clear()
 	_roots.clear()
@@ -627,6 +652,7 @@ func build_island(island: Array[PhysicsBody3D]) -> void:
 		_roots[member] = root
 		if member is InteractableObject:
 			member.fastened = true
+			member.fastening_system = self
 	# Keep isolated query shapes to resolve material layers after compounding.
 	make_probe(root)
 	for member in island:
@@ -672,19 +698,33 @@ func copy_shape(parent: PhysicsBody3D, source: CollisionShape3D) -> CollisionSha
 	parent.add_child(collider)
 	return collider
 
-func diagnostics(aim: Dictionary) -> String:
+func diagnostics(aim: Dictionary, target: InteractableObject = null) -> String:
 	var a := aim.get("a") as PhysicsBody3D
 	var b := aim.get("b") as PhysicsBody3D
 	var group := between(a, b) if is_instance_valid(a) and is_instance_valid(b) else null
-	var strengths := PackedStringArray()
-	if group != null:
-		for bolt in group.bolts:
-			if record_matches(group, bolt):
-				strengths.append("#%d LOAD %.0f / RATING %.0f" % [bolt.id, bolt.load_estimate, bolt.grade.strength])
+	var links := PackedStringArray()
+	var groups: Array[FastenerConnection] = []
+	if is_instance_valid(target):
+		var root := physics_root(target)
+		for link in connections:
+			if usable_body(link.a) and usable_body(link.b) and physics_root(link.a) == root:
+				groups.append(link)
+	if group != null and not groups.has(group):
+		groups.append(group)
+	for link: FastenerConnection in groups:
+		for bolt in link.bolts:
+			if record_matches(link, bolt):
+				links.append("Group %d · %s ↔ %s · bolt %d · LOAD %.0f / RATING %.0f" % [
+					link.id, link.a.name, link.b.name, bolt.id, bolt.load_estimate, bolt.grade.strength])
 	var broken := PackedStringArray()
-	for bolt in failed.slice(maxi(0, failed.size() - 6)):
-		broken.append(str(bolt.id))
-	return "\nFASTENER SURFACE %s → %s · DEPTH %.3f m\nCONNECTION %s · ACTIVE %d · LAST LOAD %.0f\nBOLTS %s · FAILED %s" % [
-		a.name if is_instance_valid(a) else "—", b.name if is_instance_valid(b) else "—", aim.get("depth", 0.0),
-		"#%d FIXED" % group.id if group != null else "—", installed_count(), last_load,
-		", ".join(strengths) if not strengths.is_empty() else "NONE", ", ".join(broken) if not broken.is_empty() else "NONE"]
+	for bolt in failed.slice(maxi(0, failed.size() - 3)):
+		broken.append("#%d · group %d · %s %.1f / %.0f" % [
+			bolt.id, bolt.group_id, bolt.failure_source, bolt.load_estimate, bolt.grade.strength])
+	var summary := "\nACTIVE BOLTS %d · LAST STRUCTURAL LOAD %.1f" % [installed_count(), last_load]
+	if not aim.is_empty():
+		summary += "\nFASTENER SURFACE %s → %s · DEPTH %.3f m" % [
+			a.name if is_instance_valid(a) else "—", b.name if is_instance_valid(b) else "—", aim.get("depth", 0.0)]
+	if not links.is_empty():
+		summary += "\nLINKS  " + "\n       ".join(links)
+	summary += "\nFAILED " + ("NONE" if broken.is_empty() else "\n       ".join(broken))
+	return summary
