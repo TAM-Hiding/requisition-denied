@@ -47,6 +47,15 @@ func run() -> void:
 			var axis_start: Vector3 = part.global_position - Vector3.RIGHT * (data.size.x * 0.49)
 			var bore := system.cast(axis_start, axis_start + Vector3.RIGHT * (data.size.x * 0.98))
 			check(bore.is_empty(), "Tubing retains a clear axial bore")
+		if data.category == "Round tubing":
+			check_round_tube(part, supply, index)
+			part.freeze = true
+			part.global_transform = Transform3D(Basis(Vector3.UP, PI / 3.0), supply.delivery)
+			system.sync_body_transform(part)
+			await frames(2)
+			var next_id := supply.next_id
+			check(supply.dispense(index) == null and supply.next_id == next_id,
+				"Rotated compound stock blocks an overlapping delivery on a later physics frame")
 		part.queue_free()
 		await frames(2)
 
@@ -65,7 +74,7 @@ func run() -> void:
 	var first := facility.get_node_or_null("Scrap_28") as InteractableObject
 	check(first != null and panel.feedback.text.begins_with("Dispensed"), "The UI dispenses a part")
 	panel.dispense_selected()
-	check(panel.feedback.text.contains("occupied"), "Existing stock blocks delivery")
+	check(panel.feedback.text == "REQUISITION DENIED — DELIVERY AREA OBSTRUCTED", "Existing stock blocks delivery")
 	rack_session.leave()
 	if first == null:
 		quit(1)
@@ -193,6 +202,38 @@ func run() -> void:
 	await process_frame
 	print("RD-009: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures else 0)
+
+func check_round_tube(part: InteractableObject, supply: ScrapSupply, index: int) -> void:
+	var model := part.get_children().filter(func(child: Node) -> bool: return child is MeshInstance3D)
+	check(model.size() == 1 and part.get_shape_owners().size() == 12,
+		"Round tube has one seamless visual mesh and retains its twelve collision hulls")
+	var tube: Dictionary = supply.catalog[index]
+	if model.size() == 1:
+		var mesh := (model[0] as MeshInstance3D).mesh
+		var surface := mesh.surface_get_arrays(0)
+		var vertices: PackedVector3Array = surface[Mesh.ARRAY_VERTEX]
+		var normals: PackedVector3Array = surface[Mesh.ARRAY_NORMAL]
+		var triangles: PackedInt32Array = surface[Mesh.ARRAY_INDEX]
+		var min_radius: float = tube.size.y * 0.5 - ScrapCatalog.WALL
+		var open_and_facing := true
+		for vertex in vertices:
+			open_and_facing = open_and_facing and Vector2(vertex.y, vertex.z).length() >= min_radius - 0.0001
+		for i in range(0, triangles.size(), 3):
+			var a := triangles[i]
+			var b := triangles[i + 1]
+			var c := triangles[i + 2]
+			var cross := (vertices[b] - vertices[a]).cross(vertices[c] - vertices[a])
+			open_and_facing = open_and_facing and cross.dot(normals[a]) < 0.0
+		check(open_and_facing and triangles.size() == ScrapCatalog.TUBE_VISUAL_SEGMENTS * 24,
+			"The smooth mesh has correctly facing walls and rims with no cap across the bore")
+	var rod: Array = supply.catalog[11].shapes[0]
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = rod[0]
+	query.transform = Transform3D(rod[2].basis, part.global_position - Vector3.RIGHT * (tube.size.x * 0.5 + 0.19))
+	query.motion = Vector3.RIGHT * (tube.size.x + 0.38)
+	query.collision_mask = 1
+	var fractions := part.get_world_3d().direct_space_state.cast_motion(query)
+	check(fractions[0] >= 1.0, "The stock steel rod can sweep through the entire round bore")
 
 func heavy_stock_drag(supply: ScrapSupply, actor: OtisController) -> void:
 	var plate := supply.dispense(16)

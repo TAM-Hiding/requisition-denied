@@ -66,4 +66,4 @@ func select_stock(index: int) -> void:
 
 func dispense_selected() -> void:
 	var part := supply.dispense(selected)
-	feedback.text = "Dispensed %s." % part.definition.display_name if part != null else "Delivery pad occupied. Clear it and try again."
+	feedback.text = "Dispensed %s." % part.definition.display_name if part != null else "REQUISITION DENIED — DELIVERY AREA OBSTRUCTED"

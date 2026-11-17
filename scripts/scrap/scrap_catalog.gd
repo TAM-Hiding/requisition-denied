@@ -16,6 +16,7 @@ const STOCK := [
 	["Irregular scrap", "◆", Vector2(0.033, 0.22), [0.25, 0.38, 0.49]],
 ]
 const WALL := 0.012
+const TUBE_VISUAL_SEGMENTS := 48
 const DENSITY := 7850.0
 
 static func entries() -> Array[Dictionary]:
@@ -52,13 +53,15 @@ static func describe(entry: Dictionary, variant: int) -> void:
 		"Round tubing":
 			var outer := size.y * 0.5
 			var inner := outer - WALL
+			entry.mesh = tube_mesh(size.x, outer, inner)
 			for index in 12:
 				var a := TAU * index / 12.0
 				var b := TAU * (index + 1) / 12.0
 				var outline := PackedVector2Array()
 				for radius_angle in [Vector2(outer, a), Vector2(outer, b), Vector2(inner, b), Vector2(inner, a)]:
 					outline.append(Vector2.from_angle(radius_angle.y) * radius_angle.x)
-				add_prism(entry, outline, size.x, Transform3D(Basis(Vector3(1, 1, 1).normalized(), -TAU / 3.0), Vector3.ZERO))
+				add_prism(entry, outline, size.x,
+					Transform3D(Basis(Vector3(1, 1, 1).normalized(), -TAU / 3.0), Vector3.ZERO), false)
 		"Steel rod":
 			var shape := CylinderShape3D.new()
 			shape.radius = size.y * 0.5
@@ -90,7 +93,7 @@ static func add_box(entry: Dictionary, size: Vector3, at: Vector3) -> void:
 	entry.volume += size.x * size.y * size.z
 
 static func add_prism(entry: Dictionary, outline: PackedVector2Array, height: float,
-		pose := Transform3D.IDENTITY) -> void:
+		pose := Transform3D.IDENTITY, render := true) -> void:
 	var vertices := PackedVector3Array()
 	for y in [-height * 0.5, height * 0.5]:
 		for point in outline:
@@ -111,8 +114,46 @@ static func add_prism(entry: Dictionary, outline: PackedVector2Array, height: fl
 	# Arc strips are counterclockwise or clockwise depending on the wall.
 	if area < 0.0:
 		indices.reverse()
-	for index in indices:
-		surface.add_vertex(vertices[index])
-	surface.generate_normals()
-	entry.shapes.append([shape, surface.commit(), pose])
+	var mesh: ArrayMesh
+	if render:
+		for index in indices:
+			surface.add_vertex(vertices[index])
+		surface.generate_normals()
+		mesh = surface.commit()
+	entry.shapes.append([shape, mesh, pose])
 	entry.volume += absf(area) * 0.5 * height
+
+## Only the exposed walls and rims are rendered. Cylinder normals are
+## radial, while the two cut ends keep their flat annular faces.
+static func tube_mesh(length: float, outer: float, inner: float) -> ArrayMesh:
+	var surface := SurfaceTool.new()
+	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var left := Vector3.LEFT * length * 0.5
+	var right := -left
+	for index in TUBE_VISUAL_SEGMENTS:
+		var a := tube_radial(index)
+		var b := tube_radial(index + 1)
+		var lo := left + a * outer
+		var ro := right + a * outer
+		var li := left + a * inner
+		var ri := right + a * inner
+		var next_lo := left + b * outer
+		var next_ro := right + b * outer
+		var next_li := left + b * inner
+		var next_ri := right + b * inner
+		add_tube_quad(surface, [lo, ro, next_ro, next_lo], a, b)
+		add_tube_quad(surface, [ri, li, next_li, next_ri], -a, -b)
+		add_tube_quad(surface, [ro, ri, next_ri, next_ro], Vector3.RIGHT, Vector3.RIGHT)
+		add_tube_quad(surface, [li, lo, next_lo, next_li], Vector3.LEFT, Vector3.LEFT)
+	surface.index()
+	return surface.commit()
+
+static func tube_radial(index: int) -> Vector3:
+	var angle := TAU * (index % TUBE_VISUAL_SEGMENTS) / TUBE_VISUAL_SEGMENTS
+	return Vector3(0, cos(angle), sin(angle))
+
+static func add_tube_quad(surface: SurfaceTool, points: Array[Vector3],
+		first_normal: Vector3, next_normal: Vector3) -> void:
+	for corner in [0, 1, 2, 0, 2, 3]:
+		surface.set_normal(first_normal if corner < 2 else next_normal)
+		surface.add_vertex(points[corner])

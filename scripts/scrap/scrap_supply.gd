@@ -41,15 +41,21 @@ func dispense(index: int) -> InteractableObject:
 		collision.shape = component[0]
 		collision.transform = component[2]
 		part.add_child(collision, true)
-		var model := MeshInstance3D.new()
-		model.mesh = component[1]
-		model.material_override = finish
-		model.transform = component[2]
-		part.add_child(model)
+		if component[1] != null:
+			add_model(part, component[1], component[2])
+	if entry.has("mesh"):
+		add_model(part, entry.mesh, Transform3D.IDENTITY)
 	# Use the same world parent as authored loose parts.
 	part.transform = (get_parent() as Node3D).global_transform.affine_inverse() * pose
 	get_parent().add_child(part)
 	return part
+
+func add_model(part: InteractableObject, mesh: Mesh, pose: Transform3D) -> void:
+	var model := MeshInstance3D.new()
+	model.mesh = mesh
+	model.material_override = finish
+	model.transform = pose
+	part.add_child(model)
 
 func clear_loose() -> int:
 	var count := 0
