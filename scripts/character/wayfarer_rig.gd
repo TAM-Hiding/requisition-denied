@@ -13,6 +13,7 @@ const MODULES := {
 	&"shin": preload("res://scenes/character/shin.tres"),
 	&"foot": preload("res://scenes/character/foot.tres"),
 }
+const REST_WRIST_CANT := deg_to_rad(12.0)
 const FIRST_PERSON_ITEM := 1 << 18
 var core: Node3D
 var head: Node3D
@@ -37,6 +38,7 @@ func _ready() -> void:
 		var shoulder := mount(core.get_node(label + "ShoulderMount"), label + "UpperArm", MODULES[&"upper_arm"], side)
 		var forearm := mount(shoulder.get_node("ElbowConnection"), label + "Forearm", MODULES[&"forearm"], side)
 		var hand := mount(forearm.get_node("WristConnection"), label + "Hand", MODULES[&"hand"], side)
+		hand.basis = resting_wrist(side)
 		var thigh := mount(core.get_node(label + "HipMount"), label + "Thigh", MODULES[&"thigh"], side)
 		var shin := mount(thigh.get_node("KneeConnection"), label + "Shin", MODULES[&"shin"], side)
 		var foot := mount(shin.get_node("AnkleConnection"), label + "Foot", MODULES[&"foot"], side)
@@ -126,6 +128,11 @@ func _process(delta: float) -> void:
 		update_camera()
 		update_display_item(held if holding and held.visible else null)
 
+static func resting_wrist(side: float) -> Basis:
+	# Turn the palm toward the thigh, then tip the fingers inward in the
+	# forearm frame. The grip frame stays the reference for equipment.
+	return Basis(Vector3.BACK, -side * REST_WRIST_CANT) * Basis(Vector3.UP, side * PI / 2.0)
+
 func animate(delta: float, holding: bool, manipulating: bool) -> void:
 	time_alive += delta
 	var movement := Vector2(actor.velocity.x, actor.velocity.z).length()
@@ -159,7 +166,10 @@ func animate(delta: float, holding: bool, manipulating: bool) -> void:
 		shoulder.rotation.z = lerpf(shoulder.rotation.z, limb.side * (0.09 if reaching else 0.04), blend)
 		forearm.rotation.x = lerpf(forearm.rotation.x, (1.10 if actor.tool_aiming else 0.83) if tool_hand
 			else (0.64 if manipulating else 0.10), blend)
-		hand.rotation.x = lerpf(hand.rotation.x, gaze - shoulder.rotation.x - forearm.rotation.x if tool_hand else 0.0, blend)
+		var wrist_goal := resting_wrist(limb.side)
+		if reaching:
+			wrist_goal = Basis(Vector3.RIGHT, gaze - shoulder.rotation.x - forearm.rotation.x) if tool_hand else Basis.IDENTITY
+		hand.quaternion = hand.quaternion.slerp(wrist_goal.get_rotation_quaternion(), blend)
 
 func update_display_item(item: InteractableObject) -> void:
 	if displayed_item != item:

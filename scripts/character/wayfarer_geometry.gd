@@ -153,21 +153,23 @@ func hand() -> void:
 	block(Vector3(0.068, 0.067, 0.046), Vector3(0, -0.052, 0), "graphite")
 	# Local -Z faces the grip sockets. The back plate sits opposite the palm.
 	block(Vector3(0.065, 0.048, 0.016), Vector3(0, -0.048, 0.025), "gunmetal").name = "BackPlate"
-	var inward := -side
+	# In the forward-facing grip pose, the thumb is on the outside
+	# edge of each palm, as in an open hand presented palm-forward.
+	var thumb_side := side
 	var finger_names := ["Index", "Middle", "Ring", "Little"]
 	var finger_lengths := [0.039, 0.042, 0.038, 0.031]
 	for i in 4:
-		var x := inward * (0.024 - i * 0.016)
+		var x := thumb_side * (0.024 - i * 0.016)
 		var length: float = finger_lengths[i]
 		var end_y := -0.078 - length
 		block(Vector3(0.013, length, 0.017), Vector3(x, -0.078 - length * 0.5, -0.009),
 			"steel", Vector3(0.24, 0, 0)).name = finger_names[i] + "Finger"
 		block(Vector3(0.013, 0.019, 0.020), Vector3(x, end_y, -0.022), "graphite")
 	# The thumb has a mirrored base and curls back across its own palm.
-	block(Vector3(0.019, 0.028, 0.022), Vector3(inward * 0.039, -0.064, -0.018),
-		"steel", Vector3(0.35, 0, inward * 0.40)).name = "ThumbBase"
-	block(Vector3(0.017, 0.020, 0.019), Vector3(inward * 0.040, -0.083, -0.030),
-		"graphite", Vector3(0.42, 0, -inward * 0.56)).name = "ThumbTip"
+	block(Vector3(0.019, 0.028, 0.022), Vector3(thumb_side * 0.039, -0.064, -0.018),
+		"steel", Vector3(0.35, 0, thumb_side * 0.40)).name = "ThumbBase"
+	block(Vector3(0.017, 0.020, 0.019), Vector3(thumb_side * 0.040, -0.083, -0.030),
+		"graphite", Vector3(0.42, 0, -thumb_side * 0.56)).name = "ThumbTip"
 
 func thigh() -> void:
 	cylinder(0.055, 0.1, Vector3.ZERO, "steel", Vector3(0, 0, PI / 2))

@@ -56,3 +56,11 @@ First person hides the body and uses the established camera-relative item presen
 ![Front detail of the corrected left and right manipulators](wayfarer-hands-revision-a.png)
 
 The mirrored thumb joints and finger order distinguish the left and right manipulators. Both hands retain the original wrist and grip transforms. Future third-person animation cleanup will decouple the projected Uni-Bolt from head pitch.
+
+## Revision B
+
+Revision B supersedes Revision A’s resting hand orientation. In Otis’s local frame, both palms face the thighs, the backs face outward, and the thumbs sit toward the front. Each wrist adds 12° of inward cant in the forearm frame. Reaching and equipped aiming retain the previous wrist targets and socket transforms.
+
+| Front | Rear | Side |
+| --- | --- | --- |
+| ![Front](wayfarer-rest-front.png) | ![Rear](wayfarer-rest-rear.png) | ![Side](wayfarer-rest-side.png) |

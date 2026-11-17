@@ -67,6 +67,15 @@ func run() -> void:
 	check(absf(rig.limbs[0].thigh.rotation.x) > 0.05 and rig.limbs[1].forearm.rotation.x > 0.25,
 		"Gait and equipment pose layer on the same joint hierarchy")
 	actor.velocity = Vector3.ZERO
+	actor.set_tool_aiming(true)
+	rig.animate(1.0, true, false)
+	var pitch := clampf(actor.camera.rotation.x, -0.32, 0.38) - float(rig.limbs[1].shoulder.rotation.x) \
+		- float(rig.limbs[1].forearm.rotation.x)
+	check(hand.basis.is_equal_approx(Basis(Vector3.RIGHT, pitch))
+		and grip.transform == Transform3D(Basis.IDENTITY, Vector3(0, -0.091, -0.035))
+		and alignment.transform == grip.transform,
+		"Aiming restores the original forward grip basis and exact tool sockets")
+	actor.set_tool_aiming(false)
 	rig.set_inspection(0)
 	check(actor.camera.is_current() and not rig.visible and rig.display_meshes.is_empty()
 		and actor.equipment.stow().ok, "First person and gameplay equipment resume after inspection")
@@ -77,28 +86,23 @@ func run() -> void:
 
 
 func check_handedness(rig: WayfarerRig) -> void:
-	var left: Node3D = rig.limbs[0].hand
-	var right: Node3D = rig.limbs[1].hand
-	var left_thumb := left.get_node("ThumbBase") as MeshInstance3D
-	var right_thumb := right.get_node("ThumbBase") as MeshInstance3D
-	var left_tip := left.get_node("ThumbTip") as MeshInstance3D
-	var right_tip := right.get_node("ThumbTip") as MeshInstance3D
-	check(left_thumb.position.x > 0.0 and right_thumb.position.x < 0.0
-		and absf(rig.to_local(left_thumb.global_position).x) < absf(rig.to_local(left.global_position).x)
-		and absf(rig.to_local(right_thumb.global_position).x) < absf(rig.to_local(right.global_position).x),
-		"The left and right thumbs face inward in neutral stance")
-	check(is_equal_approx(left_thumb.position.x, -right_thumb.position.x)
-		and is_equal_approx(left_tip.rotation.z, -right_tip.rotation.z)
-		and (left_tip.basis * Vector3.DOWN).x < 0.0 and (right_tip.basis * Vector3.DOWN).x > 0.0,
-		"Thumb links mirror across the wrists and curl across their own palms")
-	for hand in [left, right]:
+	rig.animate(1.0, false, false)
+	for i in 2:
+		var side := -1.0 if i == 0 else 1.0
+		var hand: Node3D = rig.limbs[i].hand
 		var thumb := hand.get_node("ThumbBase") as MeshInstance3D
-		var index_finger := hand.get_node("IndexFinger") as MeshInstance3D
-		var little_finger := hand.get_node("LittleFinger") as MeshInstance3D
-		var grip := hand.get_node("PrimaryGrip") as Marker3D
+		var tip := hand.get_node("ThumbTip") as MeshInstance3D
+		var index := hand.get_node("IndexFinger") as MeshInstance3D
+		var little := hand.get_node("LittleFinger") as MeshInstance3D
 		var back := hand.get_node("BackPlate") as MeshInstance3D
-		check(index_finger.position.x * thumb.position.x > 0.0
-			and little_finger.position.x * thumb.position.x < 0.0
-			and index_finger.position.y < 0.0 and (index_finger.basis * Vector3.DOWN).dot(Vector3.DOWN) > 0.9
-			and index_finger.position.z < 0.0 and grip.position.z < 0.0 and back.position.z > 0.0,
-			"Finger order is handed and the palm faces its forward grip")
+		var palm := rig.to_local(hand.to_global(Vector3.FORWARD)) - rig.to_local(hand.global_position)
+		var down := rig.to_local(hand.to_global(Vector3.DOWN)) - rig.to_local(hand.global_position)
+		var thumb_offset := rig.to_local(thumb.global_position) - rig.to_local(hand.global_position)
+		var back_offset := rig.to_local(back.global_position) - rig.to_local(hand.global_position)
+		check(thumb.position.x * side > 0.0 and index.position.x * side > 0.0 and little.position.x * side < 0.0
+			and (tip.basis * Vector3.DOWN).x * side < 0.0, "Thumb and finger order match the anatomical hand")
+		check(palm.dot(Vector3.LEFT * side) > 0.95 and back_offset.x * side > 0.0
+			and thumb_offset.z < -0.025, "In Otis's frame palms face thighs, backs face out and thumbs sit forward")
+		var cant := rad_to_deg(atan2(-side * down.x, -down.y))
+		check(down.dot(Vector3.DOWN) > 0.95 and cant >= 9.0 and cant <= 15.0,
+			"Neutral fingers hang down with a slight inward wrist cant")
