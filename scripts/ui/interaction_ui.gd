@@ -1,5 +1,6 @@
 extends CanvasLayer
 var service := InteractionService.new()
+var inventory: InventoryScreen
 var hud: Control
 var target: InteractableObject
 var menu_target: InteractableObject
@@ -27,6 +28,10 @@ var application_focused := true
 var _mouse_mode_before_focus_loss := Input.MOUSE_MODE_VISIBLE
 
 func _ready() -> void:
+	inventory = InventoryScreen.new()
+	inventory.actor = get_parent().get_node("Otis")
+	add_child(inventory)
+	inventory.opening.connect(cancel_hold)
 	hud = Control.new()
 	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -116,6 +121,8 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _physics_process(delta: float) -> void:
+	if inventory.active:
+		return
 	var tool := otis.equipped_tool()
 	if tool != null:
 		tool.update_removal(delta, gameplay_input_allowed())
@@ -243,6 +250,15 @@ func _physics_process(delta: float) -> void:
 
 func _input(event: InputEvent) -> void:
 	if not application_focused:
+		get_viewport().set_input_as_handled()
+		return
+	if inventory.active:
+		inventory.route(event)
+		return
+	if event.is_action_pressed("inventory_toggle") and active_station() == null and not menu_open:
+		if not event.is_echo():
+			cancel_hold()
+			inventory.show_inventory(hud)
 		get_viewport().set_input_as_handled()
 		return
 	var terminal := active_station()
@@ -441,7 +457,7 @@ func rebuild_actions() -> void:
 		var button := Button.new()
 		button.text = String(action).replace("_", " ").capitalize()
 		var use_terminal: bool = action == &"use_terminal" and station_for(menu_target) != null
-		button.disabled = action not in [&"inspect", &"pick_up", &"move", &"remove"] and not use_terminal
+		button.disabled = action not in [&"inspect", &"pick_up", &"move", &"remove", &"store"] and not use_terminal
 		if button.disabled:
 			button.text += " — unavailable in RD-002"
 		button.pressed.connect(perform_action.bind(action))
@@ -474,6 +490,9 @@ func close_menu() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and application_focused:
 		application_focused = false
+		if is_instance_valid(inventory):
+			inventory.turn_left = false
+			inventory.turn_right = false
 		suspend_tool_input()
 		_mouse_mode_before_focus_loss = Input.mouse_mode
 		if is_instance_valid(otis) and is_instance_valid(otis.equipment):
@@ -486,7 +505,7 @@ func _notification(what: int) -> void:
 		application_focused = true
 		cancel_hold()
 		if is_instance_valid(otis) and is_instance_valid(otis.placement):
-			otis.placement.set_input_suspended(active_station() != null)
+			otis.placement.set_input_suspended(active_station() != null or inventory.active)
 		Input.mouse_mode = _mouse_mode_before_focus_loss
 
 func apply_mechanical_settings() -> void:

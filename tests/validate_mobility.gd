@@ -94,9 +94,9 @@ func run() -> void:
 	check(not request(&"pick_up", wrench).ok and not equipment.pick_up(wrench).ok, "Repeated pickup rejected")
 	check(equipment.stored_items().is_empty(), "Pickup does not also store reference")
 	check(not wrench.set_mobility(ObjectDefinition.Mobility.FIXED), "Cannot change mobility during transition ownership")
-	equipment.storage_capacity = 0
+	equipment.container.definition.maximum_mass_kg = 0
 	check(not equipment.stow().ok and equipment.held_item() == wrench and not ui.status.text.is_empty(), "Full storage keeps item held with feedback")
-	equipment.storage_capacity = 1
+	equipment.container.definition.maximum_mass_kg = 25
 	check(service.request_actor_action(&"stow", otis).ok, "Held to stowed")
 	check(equipment.held_item() == null and equipment.stored_items() == [wrench], "Stored differs from active equipment")
 	check(wrench.state == InteractableObject.State.STOWED and not wrench.visible and wrench.freeze, "Stowed item hidden and frozen")

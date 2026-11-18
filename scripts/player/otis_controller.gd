@@ -28,7 +28,15 @@ func _ready() -> void:
 	add_child(equipment)
 
 func supporting_load_kg() -> float:
-	return body_mass_kg + placement.suspended_mass_kg()
+	return body_mass_kg + carrying_loads().total
+
+func carrying_loads() -> Dictionary:
+	var stored := equipment.inventory_mass_kg() if equipment != null else 0.0
+	var equipped := equipment.equipped_mass_kg() if equipment != null else 0.0
+	# Placement of owned equipment already counts in equipped load.
+	var external := placement.suspended_mass_kg() if placement.is_grabbing() else 0.0
+	return {"inventory": stored, "equipped": equipped, "external": external,
+		"dragged": 0.0, "total": stored + equipped + external}
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:

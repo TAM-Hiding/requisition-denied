@@ -32,13 +32,25 @@ godot --path .
 | Escape | Close the terminal or context menu and resume. Cancel placement or release a grabbed load. Otherwise, release the mouse. |
 | Hold E (0.35 s) | Stow the held item; never also triggers a tap |
 | G tap / hold | Hold for 0.2 s to manipulate an equipped item or a targeted movable object. Release the hold to keep manipulating. Tap G to place, or to drop ordinary equipment when idle. |
-| 1 | Retrieve the first stored item into the active slot |
+| 1 | Retrieve the first compatible stored tool into the active slot |
+| T | Open or close personal inventory |
+| Q / E in inventory | Rotate the character preview |
 | F3 | Toggle developer diagnostics |
 
 Movement is suspended while a menu is open or the mouse is released. The menu
 supports keyboard navigation with Tab / arrow keys and Enter. Inspect records
 only the displayed name and description; repeated identical observations do not
 create duplicate entries. Restarting the session clears knowledge.
+
+## Personal inventory
+
+Choose **E → Store** on an eligible world object, then open **T**. Right-click
+entries to equip, unequip or retrieve them into clear space. The grid grows with
+contents. Provisional limits are 30 L, 25 kg, and a 60 × 40 × 25 cm insertion
+envelope. Storage retains the physical item for the running session.
+
+The [inventory documentation](docs/inventory/README.md) describes ownership,
+capacity, serialization, and the future physical-container interface.
 
 ## Administrative workstation
 

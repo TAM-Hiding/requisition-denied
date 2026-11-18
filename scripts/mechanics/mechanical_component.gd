@@ -28,3 +28,8 @@ func inspection_information() -> Dictionary:
 		if child is MechanicalAssembly:
 			info.description += "\n" + child.configuration_text()
 	return info
+
+func inventory_state() -> Dictionary:
+	var snapshot := super.inventory_state()
+	snapshot.integrity = integrity
+	return snapshot

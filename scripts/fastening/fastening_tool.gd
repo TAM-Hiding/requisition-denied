@@ -104,3 +104,16 @@ func use(camera: Camera3D, actor: PhysicsBody3D) -> String:
 func hud_text() -> String:
 	return "UNI-BOLT™  |  %s  |  %s  |  %d/%d  ·  %d IN RESERVE" % [
 		"REMOVE" if removing else "INSTALL", GRADES[grade_index].title.to_upper(), rounds.size(), CAPACITY, recovered.size()]
+
+func inventory_state() -> Dictionary:
+	var state := super.inventory_state()
+	var magazine: Array[Dictionary] = []
+	var reserve: Array[Dictionary] = []
+	for bolt in rounds:
+		magazine.append({"id": bolt.id, "grade": bolt.grade.resource_path})
+	for bolt in recovered:
+		reserve.append({"id": bolt.id, "grade": bolt.grade.resource_path})
+	state.tool = {"grade": grade_index, "rounds": magazine, "recovered": reserve,
+		"removing": removing, "removal_remaining": removal_remaining,
+		"removal_behavior": removal_behavior, "removal_seconds": removal_seconds}
+	return state
