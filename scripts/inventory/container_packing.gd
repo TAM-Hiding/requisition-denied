@@ -19,8 +19,42 @@ static func local_bounds(item: InteractableObject) -> AABB:
 			initialized = true
 	return bounds
 
+## Compose the pose before taking bounds. Rotating an already merged AABB
+## invents corners in cylinders, convex stock and empty compound-body space.
 static func bounds(record: InventoryItem, pose: Transform3D) -> AABB:
-	return pose * local_bounds(record.body)
+	var result := AABB()
+	var initialized := false
+	var scale_basis := Basis.from_scale(record.body.global_basis.get_scale().abs())
+	for child in record.body.get_children():
+		if child is CollisionShape3D and not child.disabled and child.shape != null:
+			var box := shape_bounds(child.shape, pose * Transform3D(scale_basis, Vector3.ZERO) * child.transform)
+			result = result.merge(box) if initialized else box
+			initialized = true
+	return result
+
+static func shape_bounds(shape: Shape3D, pose: Transform3D) -> AABB:
+	if shape is ConvexPolygonShape3D and not shape.points.is_empty():
+		var result := AABB(pose * shape.points[0], Vector3.ZERO)
+		for point in shape.points:
+			result = result.expand(pose * point)
+		return result
+	if not (shape is BoxShape3D or shape is CylinderShape3D or shape is SphereShape3D or shape is CapsuleShape3D):
+		return pose * shape.get_debug_mesh().get_aabb()
+	var half_extent := Vector3.ZERO
+	var directions := pose.basis.transposed()
+	for axis in 3:
+		var direction: Vector3 = directions[axis]
+		if shape is BoxShape3D:
+			half_extent[axis] = direction.abs().dot(shape.size) * 0.5
+		elif shape is CylinderShape3D:
+			half_extent[axis] = absf(direction.y) * shape.height * 0.5 \
+				+ Vector2(direction.x, direction.z).length() * shape.radius
+		elif shape is CapsuleShape3D:
+			half_extent[axis] = direction.length() * shape.radius \
+				+ absf(direction.y) * maxf(0.0, shape.height * 0.5 - shape.radius)
+		else:
+			half_extent[axis] = direction.length() * shape.radius
+	return AABB(pose.origin - half_extent, half_extent * 2.0)
 
 static func inside(box: AABB, envelope: Vector3, tolerance := 0.0) -> bool:
 	var low := Vector3(-envelope.x / 2, 0, -envelope.z / 2)

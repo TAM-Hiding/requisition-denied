@@ -13,6 +13,7 @@ var drag_item: InteractableObject
 var drag_goal := Vector3.ZERO
 var plow_goal := Vector3.ZERO
 var plow_plane_y := 0.0
+var containment_tolerance := 0.004
 var extent: Vector3
 var hover: InteractableObject
 var selected: InteractableObject
@@ -21,6 +22,12 @@ var _contact_shape: SphereShape3D
 
 func _ready() -> void:
 	extent = container.definition.packing_dimensions()
+	# This is an escape guard, not a second contact solver. Jolt may retain
+	# shallow resting penetration within its configured slop. Resetting such
+	# contacts here erases newly submitted drag/plow impulses every frame.
+	if get_world_3d().direct_space_state.get_class() == "JoltPhysicsDirectSpaceState3D":
+		containment_tolerance += clampf(ProjectSettings.get_setting(
+			"physics/jolt_physics_3d/simulation/penetration_slop", 0.0), 0.0, 0.02)
 	_contact_shape = SphereShape3D.new()
 	_contact_shape.radius = 0.028
 	_highlight = StandardMaterial3D.new()
@@ -223,7 +230,7 @@ func _physics_process(delta: float) -> void:
 		var record := InventoryItem.from_body(source)
 		var box := ContainerPacking.bounds(record, body.transform)
 		# The physical walls are primary. Recover only an invalid escaped pose.
-		if ContainerPacking.inside(box, extent, 0.004):
+		if ContainerPacking.inside(box, extent, containment_tolerance):
 			safe_poses[source] = body.transform
 		else:
 			body.transform = safe_poses[source]

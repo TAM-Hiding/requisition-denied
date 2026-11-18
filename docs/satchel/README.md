@@ -80,3 +80,7 @@ Graphical captures use the real Godot 4.7.2 Compatibility renderer with software
 6. Check expanded volume and the independent 25 kg rating, delivery-pad occupancy, hydraulic loading and structural separation.
 
 Packing is a bounded conservative search. Hidden items can require rummaging or a different viewpoint for selection. Pleats and shell expansion are visual, using a fixed maximum collision envelope. Inversion is an abstracted batch transfer. Crowded world geometry can retain some items. Full cloth, exhaustive nesting and world save/load remain outside scope.
+
+## Round-stock playtest correction
+
+The final round-stock correction replaces inflated rotated bounds with actual shape-support bounds and makes the defensive containment guard compatible with Jolt's resting-contact tolerance. Bag controls, dimensions, 50/60 L capacity, 25 kg rating, pleats and inversion settings are preserved. See [the controlled reproduction, focused tests and graphical demonstration](round-stock-correction.md).
