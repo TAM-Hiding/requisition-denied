@@ -32,6 +32,11 @@ func _ready() -> void:
 	visible = false
 	core = mount(self, "CoreChassis", MODULES[&"core"], 0.0)
 	core.position.y = 0.94
+	var satchel := Node3D.new()
+	satchel.set_script(preload("res://scripts/character/industrial_satchel.gd"))
+	satchel.name = "IndustrialSatchel"
+	core.get_node("RearEquipmentMount").add_child(satchel)
+	satchel.position = Vector3(0, -0.21, 0.17)
 	head = mount(core.get_node("HeadMount"), "HeadModule", MODULES[&"head"], 0.0)
 	for side in [-1.0, 1.0]:
 		var label := "Left" if side < 0.0 else "Right"

@@ -491,6 +491,8 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and application_focused:
 		application_focused = false
 		if is_instance_valid(inventory):
+			inventory.bag.end_plow()
+			inventory.bag.orbiting = false
 			inventory.turn_left = false
 			inventory.turn_right = false
 		suspend_tool_input()

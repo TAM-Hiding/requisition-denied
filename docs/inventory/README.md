@@ -46,9 +46,9 @@ The provisional personal container is configured in data/inventory/personal_stor
 
 | Property | Initial value |
 | --- | --- |
-| Nominal volume | 30 litres |
+| Nominal volume | 50 litres |
 | Structural weight rating | 25 kg |
-| Insertion envelope | 60 × 40 × 25 cm |
+| Insertion envelope | 64 × 40 × 26 cm |
 | Number of cells | Grows with contents |
 
 An item's bounds combine its active collision shapes and local offsets, rotations and body scale. The occupied volume is their bounding box volume, so hollow and irregular stock consume a conservative envelope. Sorted item dimensions must fit the sorted insertion envelope. Aggregate mass and volume must stay within the container's ratings. This approximation does not solve 3D packing.
@@ -84,3 +84,5 @@ While holding a workpiece, equip the stored gun with 1 and aim while repositioni
 Independent review found pending E input, mixed-inventory tool selection, incomplete retrieval sweeps and missing container notifications. These were corrected with regressions. World-parent and scene-tree preconditions were also added before ownership changes.
 
 Known limits include approximate volume packing, one active tool slot, no persistence across process exits, and symbolic category icons. The preview is a visual snapshot refreshed on opening and equipment changes. Existing chassis animation and head/tool synchronization are preserved.
+
+RD-012 adds physical packing after the approximate checks, persisted packing metadata, and an on-demand interior. See [the satchel contract](../satchel/README.md) for current behavior.

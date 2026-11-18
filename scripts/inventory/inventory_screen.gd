@@ -5,6 +5,10 @@ var actor: OtisController
 var active := false
 var panel: PanelContainer
 var preview: InventoryPreview
+var bag: BagView
+var bag_panel: VBoxContainer
+var view_toggle: Button
+var bag_retrieve: Button
 var grid: GridContainer
 var grid_scroll: ScrollContainer
 var collapse: Button
@@ -84,6 +88,27 @@ func _ready() -> void:
 		grid_scroll.visible = not grid_scroll.visible
 		collapse.text = "CONTENTS   ▾" if grid_scroll.visible else "CONTENTS   ▸")
 	right.add_child(collapse)
+	view_toggle = Button.new()
+	view_toggle.text = "BAG VIEW"
+	view_toggle.pressed.connect(toggle_view)
+	right.add_child(view_toggle)
+	bag_panel = VBoxContainer.new()
+	bag_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right.add_child(bag_panel)
+	bag = BagView.new()
+	bag.container = actor.equipment.container
+	bag.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	bag.item_selected.connect(select_item)
+	bag_panel.add_child(bag)
+	bag_panel.add_child(label("CLICK SELECT • RMB PLOW\nMMB LOOK • WHEEL ZOOM", 12))
+	bag_retrieve = Button.new()
+	bag_retrieve.text = "RETRIEVE SELECTED"
+	bag_retrieve.disabled = true
+	bag_retrieve.pressed.connect(func() -> void:
+		if actor.equipment.container.contains(selected):
+			perform_action(2))
+	bag_panel.add_child(bag_retrieve)
+	bag_panel.hide()
 	grid_scroll = ScrollContainer.new()
 	grid_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	right.add_child(grid_scroll)
@@ -145,6 +170,11 @@ func show_inventory(hud: Control) -> bool:
 func hide_inventory() -> void:
 	if not active:
 		return
+	bag.close()
+	bag_panel.hide()
+	grid_scroll.show()
+	collapse.show()
+	view_toggle.text = "BAG VIEW"
 	active = false
 	turn_left = false
 	turn_right = false
@@ -159,6 +189,10 @@ func hide_inventory() -> void:
 func route(event: InputEvent) -> void:
 	if not active:
 		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
+		bag.end_plow()
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and not event.pressed:
+		bag.orbiting = false
 	if event.is_action_pressed("inventory_toggle") or event.is_action_pressed("ui_cancel"):
 		if not event.is_echo():
 			hide_inventory()
@@ -176,9 +210,42 @@ func _process(delta: float) -> void:
 	if active:
 		preview.pivot.rotation.y += (float(turn_right) - float(turn_left)) * delta * 1.6
 
+func toggle_view() -> void:
+	if bag.active:
+		bag.close()
+		bag_panel.hide()
+		grid_scroll.show()
+		collapse.show()
+		view_toggle.text = "BAG VIEW"
+	else:
+		bag.selected = selected if actor.equipment.container.contains(selected) else null
+		bag_retrieve.disabled = not actor.equipment.container.contains(selected)
+		var issue := bag.open()
+		if not issue.is_empty():
+			feedback.text = issue
+			return
+		bag_panel.show()
+		grid_scroll.hide()
+		collapse.hide()
+		view_toggle.text = "GRID VIEW"
+
+func select_item(item: InteractableObject) -> void:
+	selected = item
+	bag.selected = item
+	bag_retrieve.disabled = not actor.equipment.container.contains(item)
+	var record := InventoryItem.from_body(item)
+	var size := record.dimensions()
+	details.text = "%s\n%s\n\n%s\n%.2f kg · %.2f L\n%.0f × %.0f × %.0f mm" % [
+		item.definition.display_name, item.definition.object_id, item.definition.condition,
+		item.mass, record.volume_m3() * 1000, size.x * 1000, size.y * 1000, size.z * 1000]
+
 func refresh() -> void:
+	var reopen := bag.active
+	if reopen:
+		bag.close()
 	var equipment := actor.equipment
 	var container := equipment.container
+	bag_retrieve.disabled = not container.contains(selected)
 	var mass := actor.carrying_loads()
 	load_label.text = "CARRIED  %.2f kg\nLIFT REFERENCE  %.2f kg\n\nINVENTORY  %.2f kg\nEQUIPPED  %.2f kg\nEXTERNAL HOLD  %.2f kg\n\nVOLUME  %.1f / %.1f L\nCONTAINER RATING  %.1f kg" % [
 		mass.total, actor.placement.lift_capacity(), mass.inventory, mass.equipped, mass.external,
@@ -201,16 +268,17 @@ func refresh() -> void:
 		button.gui_input.connect(entry_input.bind(item))
 		grid.add_child(button)
 	preview.refresh(actor)
+	if reopen:
+		bag.selected = selected if actor.equipment.container.contains(selected) else null
+		bag_retrieve.disabled = not actor.equipment.container.contains(selected)
+		var issue := bag.open()
+		if not issue.is_empty():
+			feedback.text = issue
 
 func entry_input(event: InputEvent, item: InteractableObject) -> void:
 	if not event is InputEventMouseButton or not event.pressed or not is_instance_valid(item):
 		return
-	selected = item
-	var record := InventoryItem.from_body(item)
-	var size := record.dimensions()
-	details.text = "%s\n%s\n\n%s\n%.2f kg · %.2f L\n%.0f × %.0f × %.0f mm" % [
-		item.definition.display_name, item.definition.object_id, item.definition.condition,
-		item.mass, record.volume_m3() * 1000, size.x * 1000, size.y * 1000, size.z * 1000]
+	select_item(item)
 	if event.button_index != MOUSE_BUTTON_RIGHT:
 		return
 	popup.clear()
@@ -227,6 +295,9 @@ func entry_input(event: InputEvent, item: InteractableObject) -> void:
 func perform_action(id: int) -> void:
 	if not is_instance_valid(selected):
 		return
+	var reopen := bag.active
+	if reopen:
+		bag.close()
 	var equipment := actor.equipment
 	var result := {"ok": false, "message": "Item unavailable."}
 	if id == 0:
@@ -239,3 +310,8 @@ func perform_action(id: int) -> void:
 	# A newly equipped item remains hidden behind the interface.
 	equipment.presentation.set_station_active(true)
 	refresh()
+	if reopen:
+		bag.selected = selected if equipment.container.contains(selected) else null
+		var issue := bag.open()
+		if not issue.is_empty():
+			feedback.text = issue

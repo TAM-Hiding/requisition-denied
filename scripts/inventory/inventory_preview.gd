@@ -55,9 +55,18 @@ func refresh(actor: OtisController) -> void:
 			mesh.transform = item.global_transform.affine_inverse() * source.global_transform
 			projection.add_child(mesh)
 
-func copy_visual(source: Node3D, parent: Node3D) -> Node3D:
+static func copy_visual(source: Node3D, parent: Node3D) -> Node3D:
 	var node: Node3D
-	if source is MeshInstance3D:
+	if source is Label3D:
+		var label := Label3D.new()
+		label.text = source.text
+		label.font_size = source.font_size
+		label.pixel_size = source.pixel_size
+		label.modulate = source.modulate
+		label.outline_size = source.outline_size
+		label.billboard = source.billboard
+		node = label
+	elif source is MeshInstance3D:
 		var model := MeshInstance3D.new()
 		model.mesh = source.mesh
 		model.material_override = source.material_override

@@ -46,8 +46,16 @@ create duplicate entries. Restarting the session clears knowledge.
 
 Choose **E → Store** on an eligible world object, then open **T**. Right-click
 entries to equip, unequip or retrieve them into clear space. The grid grows with
-contents. Provisional limits are 30 L, 25 kg, and a 60 × 40 × 25 cm insertion
+contents. Provisional limits are 50 L, 25 kg, and a 64 × 40 × 26 cm insertion
 envelope. Storage retains the physical item for the running session.
+
+Use **Bag View** to select physical contents and **Grid View** to return to the
+grid. Hold **RMB** inside the bag to push items aside. Middle-mouse drag changes
+the bag viewpoint and the wheel adjusts zoom. Arrangements persist between
+inspections.
+
+The [physical satchel documentation](docs/satchel/README.md) covers packing,
+containment and the isolated simulation.
 
 The [inventory documentation](docs/inventory/README.md) describes ownership,
 capacity, serialization, and the future physical-container interface.

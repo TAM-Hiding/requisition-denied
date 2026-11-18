@@ -2,6 +2,7 @@ class_name InventoryItem
 extends RefCounted
 ## A record references the live object. It never instantiates a replacement.
 var body: InteractableObject
+var packed := false
 var internal_pose := Transform3D.IDENTITY
 
 static func from_body(item: InteractableObject) -> InventoryItem:
@@ -29,7 +30,7 @@ func snapshot() -> Dictionary:
 		"name": body.definition.display_name, "mass_kg": body.mass,
 		"dimensions_m": vector_array(dimensions()), "volume_m3": volume_m3(),
 		"equipment_slots": Array(body.compatible_equipment_slots()),
-		"gameplay": serialized_state(body), "internal_pose": transform_array(internal_pose)
+		"packed": packed, "gameplay": serialized_state(body), "internal_pose": transform_array(internal_pose)
 	}
 
 static func serialized_state(item: InteractableObject) -> Variant:

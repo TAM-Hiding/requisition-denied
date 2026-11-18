@@ -76,7 +76,17 @@ func admission(item: InteractableObject, outgoing: InteractableObject = null) ->
 	if volume > definition.capacity_m3 + 0.000001:
 		return "Container volume capacity exceeded."
 	if packing_validator.is_valid():
-		return packing_validator.call(record)
+		var issue: String = packing_validator.call(record)
+		if not issue.is_empty():
+			return issue
+	if definition.physical_packing:
+		var candidates: Array[InventoryItem] = []
+		for existing in records():
+			if existing.body != outgoing:
+				candidates.append(existing)
+		candidates.append(record)
+		if ContainerPacking.plan(candidates, definition.insertion_dimensions).size() != candidates.size():
+			return "No reliable physical placement in the container."
 	return ""
 
 func insert(item: InteractableObject) -> String:
@@ -103,6 +113,7 @@ func commit_insert(item: InteractableObject) -> void:
 	item.hide()
 	item.process_mode = Node.PROCESS_MODE_DISABLED
 	_records.append(InventoryItem.from_body(item))
+	initialize_packing()
 
 func commit_remove(item: InteractableObject) -> void:
 	for record in _records:
@@ -112,13 +123,24 @@ func commit_remove(item: InteractableObject) -> void:
 	item.storage_owner = null
 	item.process_mode = Node.PROCESS_MODE_INHERIT
 
+func initialize_packing() -> bool:
+	if not definition.physical_packing or _records.is_empty():
+		return true
+	var poses := ContainerPacking.plan(records(), definition.insertion_dimensions)
+	if poses.size() != _records.size():
+		return false
+	for record: InventoryItem in poses:
+		record.internal_pose = poses[record]
+		record.packed = true
+	return true
+
 func fullness() -> StringName:
 	var ratio := volume_m3() / maxf(definition.capacity_m3, 0.000001)
 	if ratio <= 0:
 		return &"empty"
-	if ratio < 0.75:
+	if ratio < 0.65:
 		return &"partially_full"
-	return &"full" if ratio <= 1.0 else &"bulging"
+	return &"full" if ratio < 0.9 else &"bulging"
 
 func snapshot() -> Dictionary:
 	_prune_deleted()
@@ -177,15 +199,27 @@ func restore_manifest(data: Dictionary, registry: Dictionary) -> String:
 		if total_mass > definition.maximum_mass_kg or total_volume > definition.capacity_m3:
 			return "Manifest exceeds container capacity."
 		record.internal_pose = pose
+		record.packed = entry.get("packed", false)
 		staged.append(record)
 		seen[id] = true
+	if definition.physical_packing:
+		var poses := ContainerPacking.plan(staged, definition.insertion_dimensions)
+		if poses.size() != staged.size():
+			return "Manifest has no reliable physical arrangement."
+		for record: InventoryItem in poses:
+			record.internal_pose = poses[record]
+			record.packed = true
 	# Existing contents cannot disappear through a partial manifest.
 	for record in _records:
 		if not seen.has(String(record.body.definition.object_id)):
 			return "Manifest omits an owned item."
+	var packed_poses := {}
 	for record in staged:
+		packed_poses[record] = record.internal_pose
 		if record.body.storage_owner == null:
 			commit_insert(record.body)
 	_records = staged
+	for record in staged:
+		record.internal_pose = packed_poses[record]
 	changed.emit()
 	return ""
