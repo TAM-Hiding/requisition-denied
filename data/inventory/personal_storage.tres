@@ -8,3 +8,5 @@ capacity_m3 = 0.05
 maximum_mass_kg = 25.0
 insertion_dimensions = Vector3(0.64, 0.4, 0.26)
 physical_packing = true
+expanded_capacity_m3 = 0.06
+expanded_dimensions = Vector3(0.68, 0.42, 0.28)

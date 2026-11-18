@@ -165,16 +165,19 @@ func compound_and_strength() -> void:
 	backing.gravity_scale = 0.0
 	backing.linear_velocity = Vector3.ZERO
 	backing.angular_velocity = Vector3.ZERO
-	var angle := facility.get_node("AngleBracket") as InteractableObject
+	var angle := (facility.scrap_supply as ScrapSupply).dispense(3)
+	check(angle != null, "The regression fixture is dispensed angle stock")
+	if angle == null:
+		return
 	angle.gravity_scale = 0.0
 	# Face the upright flange toward the crate with the horizontal leg
 	# extending toward Otis. The back of the flange sits within 8 mm.
-	angle.global_transform = Transform3D(Basis(Vector3.UP, PI), Vector3(0.8, 1.25, 4.417))
+	angle.global_transform = Transform3D(Basis(Vector3.UP, PI), Vector3(0.8, 1.65, 4.485))
 	angle.linear_velocity = Vector3.ZERO
 	angle.angular_velocity = Vector3.ZERO
 	actor.global_position = Vector3(0.8, 0.02, 3.15)
 	await frames(3)
-	actor.camera.look_at(angle.to_global(Vector3(0.05, 0.16, -0.109)))
+	actor.camera.look_at(angle.to_global(Vector3(0.05, 0.025, -0.054)))
 	check(actor.placement.begin_world(angle), "Compound angle bracket remains precision-manipulable with the tool equipped")
 	actor.set_tool_aiming(true)
 	var start := actor.camera.global_position
@@ -195,7 +198,7 @@ func compound_and_strength() -> void:
 	var bolt := group.bolts[0]
 	var root_body := system.physics_root(angle) as RigidBody3D
 	check(root_body == backing and angle.get_parent() == backing and angle.collision_layer == 0
-		and is_equal_approx(root_body.mass, 38.0), "Free island has one simulated compound and preserves mass")
+		and is_equal_approx(root_body.mass, backing.definition.mass_kg + angle.definition.mass_kg), "Free island has one simulated compound and preserves mass")
 	var local := angle.to_local(bolt.head())
 	var start_pos := angle.global_position
 	root_body.apply_central_impulse(Vector3.RIGHT * 20.0)
@@ -540,8 +543,12 @@ func repeated_construction() -> void:
 	await frames()
 
 func pose_and_gusset() -> void:
-	var gusset := facility.get_node("TriangularGusset") as InteractableObject
-	var model := gusset.get_node("Model") as MeshInstance3D
+	var gusset := (facility.scrap_supply as ScrapSupply).dispense(17)
+	check(gusset != null, "The regression fixture is the dispenser-generated gusset")
+	if gusset == null:
+		return
+	gusset.global_position = Vector3(-4.10, 0.011, 3.60)
+	var model := gusset.get_children().filter(func(child: Node) -> bool: return child is MeshInstance3D)[0] as MeshInstance3D
 	var mesh := model.mesh
 	var hull := gusset.get_node("CollisionShape3D").shape as ConvexPolygonShape3D
 	var faces := mesh.get_faces()

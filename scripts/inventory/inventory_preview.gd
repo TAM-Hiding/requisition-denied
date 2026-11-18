@@ -40,19 +40,35 @@ func refresh(actor: OtisController) -> void:
 	var rig := actor.get_node("ICF01_Wayfarer") as WayfarerRig
 	var core := copy_visual(rig.core, pivot)
 	core.name = "PreviewChassis"
-	# The hierarchy is copied as visual nodes only, including socket transforms.
+	# Pose the visual copy from current ownership, independent of which render
+	# frame last animated the live chassis.
 	var item := actor.equipment.held_item()
+	var holding := item != null and not actor.equipment.placing
+	var gaze := clampf(actor.camera.rotation.x, -0.32, 0.38)
+	for limb in rig.limbs:
+		var shoulder := core.get_node(rig.core.get_path_to(limb.shoulder)) as Node3D
+		var forearm := core.get_node(rig.core.get_path_to(limb.forearm)) as Node3D
+		var hand := core.get_node(rig.core.get_path_to(limb.hand)) as Node3D
+		var tool_hand: bool = holding and limb.side > 0
+		shoulder.rotation.x = 0.38 if tool_hand else 0.0
+		shoulder.rotation.z = limb.side * (0.09 if tool_hand else 0.04)
+		forearm.rotation.x = 0.83 if tool_hand else 0.10
+		hand.basis = Basis(Vector3.RIGHT, clampf(gaze - shoulder.rotation.x - forearm.rotation.x, -0.70, 0.70)) \
+			if tool_hand else WayfarerRig.resting_wrist(limb.side)
+
 	if item != null and not actor.equipment.placing:
 		var hand_path := rig.core.get_path_to(rig.limbs[1].hand.get_node("ToolAlignment"))
 		var socket := core.get_node(hand_path) as Node3D
 		var projection := Node3D.new()
 		socket.add_child(projection)
-		projection.position = -Vector3(0, -0.035, 0.10) if item is FasteningTool else Vector3.ZERO
+		projection.basis = socket.global_basis.inverse() * pivot.global_basis * Basis(Vector3.RIGHT, gaze)
+		var handle := Vector3(0, -0.035, 0.10) if item is FasteningTool else Vector3.ZERO
 		for source in item.find_children("*", "MeshInstance3D", true, false):
 			var mesh := MeshInstance3D.new()
 			mesh.mesh = source.mesh
 			mesh.material_override = source.material_override
 			mesh.transform = item.global_transform.affine_inverse() * source.global_transform
+			mesh.position -= handle
 			projection.add_child(mesh)
 
 static func copy_visual(source: Node3D, parent: Node3D) -> Node3D:

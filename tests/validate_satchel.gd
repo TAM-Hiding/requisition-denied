@@ -53,7 +53,7 @@ func run() -> void:
 	check(eq.store_world(wrench).ok, "Existing world item enters physical packing")
 	var first := container.records()[0]
 	check(first.packed and ContainerPacking.inside(ContainerPacking.bounds(first, first.internal_pose),
-		container.definition.insertion_dimensions), "Storage assigns a safe interior pose before ownership transfer")
+		container.definition.packing_dimensions()), "Storage assigns a safe interior pose before ownership transfer")
 	var crate := stock(facility, "TestBlock", Vector3(0.09, 0.055, 0.09))
 	check(eq.store_world(crate).ok and container.items().size() == 2, "A second real item occupies the same authoritative container")
 	var light_mass := container.mass_kg()
@@ -63,6 +63,8 @@ func run() -> void:
 	tiny.definition = container.definition.duplicate()
 	tiny.definition.container_id = &"SMALL"
 	tiny.definition.insertion_dimensions = Vector3.ONE * 0.2
+	tiny.definition.expanded_capacity_m3 = 0
+	tiny.definition.expanded_dimensions = Vector3.ZERO
 	facility.add_child(tiny)
 	var one := stock(facility, "One", Vector3.ONE * 0.15)
 	var two := stock(facility, "Two", Vector3.ONE * 0.15)
@@ -90,10 +92,12 @@ func run() -> void:
 	press.pressed = true
 	press.position = screen.bag.camera.unproject_position(top)
 	screen.bag._gui_input(press)
-	check(interior.plowing, "RMB begins a clear virtual plow approach")
+	check(not interior.plowing, "RMB press waits for a deliberate hold and movement")
 	var movement := InputEventMouseMotion.new()
 	movement.position = screen.bag.camera.unproject_position(Vector3(start.x + 0.09, top.y, start.z))
 	screen.bag._gui_input(movement)
+	screen.bag.advance_gestures(screen.bag.tuning.plow_hold_seconds + 0.01)
+	check(interior.plowing, "RMB hold and movement begin the plow")
 	await frames(65)
 	check(body.position.distance_to(start) > 0.004, "Plow movement physically displaces a block")
 	var release := InputEventMouseButton.new()
@@ -102,7 +106,7 @@ func run() -> void:
 	screen.route(release)
 	check(not interior.plowing and interior.pusher.collision_layer == 0, "RMB release immediately restores ordinary selection")
 	check(ContainerPacking.inside(ContainerPacking.bounds(InventoryItem.from_body(crate), body.transform),
-		container.definition.insertion_dimensions, 0.004), "Pushed object stays within bag walls")
+		container.definition.packing_dimensions(), 0.004), "Pushed object stays within bag walls")
 	var point := screen.bag.camera.unproject_position(body.global_position)
 	var hit := interior.pick(screen.bag.camera, point)
 	check(not hit.is_empty() and hit.item == crate, "Normal cursor ray selects the visible physical item")
@@ -147,7 +151,7 @@ func run() -> void:
 	screen.perform_action(0)
 	check(eq.held_item() == wrench and not container.contains(wrench), "Grid Equip uses the same physical packing records")
 	screen.toggle_view()
-	check(screen.bag.interior.selected == null and screen.bag_retrieve.disabled,
+	check(screen.bag.interior.selected == null and not container.contains(wrench),
 		"Bag retrieval cannot accidentally drop an equipped grid selection")
 	screen.toggle_view()
 	screen.perform_action(1)
@@ -182,7 +186,7 @@ func stress_container(facility: Node3D, screen: InventoryScreen) -> void:
 	var contained := true
 	for record in container.records():
 		contained = contained and ContainerPacking.inside(ContainerPacking.bounds(record,
-			bag.interior.proxies[record.body].transform), container.definition.insertion_dimensions, 0.004)
+			bag.interior.proxies[record.body].transform), container.definition.packing_dimensions(), 0.004)
 	check(contained, "Near-full contents remain inside the isolated boundaries")
 	bag.close()
 	check(bag.simulation == null, "Near-full physics is released on close")

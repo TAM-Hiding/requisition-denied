@@ -36,7 +36,7 @@ func _ready() -> void:
 	satchel.set_script(preload("res://scripts/character/industrial_satchel.gd"))
 	satchel.name = "IndustrialSatchel"
 	core.get_node("RearEquipmentMount").add_child(satchel)
-	satchel.position = Vector3(0, -0.21, 0.17)
+	satchel.transform = satchel.tuning.attachment_transform()
 	head = mount(core.get_node("HeadMount"), "HeadModule", MODULES[&"head"], 0.0)
 	for side in [-1.0, 1.0]:
 		var label := "Left" if side < 0.0 else "Right"
@@ -173,7 +173,7 @@ func animate(delta: float, holding: bool, manipulating: bool) -> void:
 			else (0.64 if manipulating else 0.10), blend)
 		var wrist_goal := resting_wrist(limb.side)
 		if reaching:
-			wrist_goal = Basis(Vector3.RIGHT, gaze - shoulder.rotation.x - forearm.rotation.x) if tool_hand else Basis.IDENTITY
+			wrist_goal = Basis(Vector3.RIGHT, clampf(gaze - shoulder.rotation.x - forearm.rotation.x, -0.70, 0.70)) if tool_hand else Basis.IDENTITY
 		hand.quaternion = hand.quaternion.slerp(wrist_goal.get_rotation_quaternion(), blend)
 
 func update_display_item(item: InteractableObject) -> void:
@@ -198,8 +198,12 @@ func update_display_item(item: InteractableObject) -> void:
 		if not is_instance_valid(source):
 			continue
 		var display: MeshInstance3D = display_meshes[source]
-		display.transform = item.global_transform.affine_inverse() * source.global_transform
-		display.position -= handle
+		var socket := display.get_parent() as Node3D
+		var gaze := clampf(actor.camera.rotation.x, -0.32, 0.38)
+		var compensation := socket.global_basis.inverse() * actor.global_basis * Basis(Vector3.RIGHT, gaze)
+		var model_pose := item.global_transform.affine_inverse() * source.global_transform
+		model_pose.origin -= handle
+		display.transform = Transform3D(compensation, Vector3.ZERO) * model_pose
 		display.visible = source.is_visible_in_tree()
 		display.material_override = source.material_override
 

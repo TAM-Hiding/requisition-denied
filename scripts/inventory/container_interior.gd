@@ -9,6 +9,8 @@ var safe_poses: Dictionary = {}
 var walls: Array[Node3D] = []
 var pusher: AnimatableBody3D
 var plowing := false
+var drag_item: InteractableObject
+var drag_goal := Vector3.ZERO
 var plow_goal := Vector3.ZERO
 var plow_plane_y := 0.0
 var extent: Vector3
@@ -18,7 +20,7 @@ var _highlight: StandardMaterial3D
 var _contact_shape: SphereShape3D
 
 func _ready() -> void:
-	extent = container.definition.insertion_dimensions
+	extent = container.definition.packing_dimensions()
 	_contact_shape = SphereShape3D.new()
 	_contact_shape.radius = 0.028
 	_highlight = StandardMaterial3D.new()
@@ -58,11 +60,19 @@ func make_boundary(size: Vector3, at: Vector3, visible_shell: bool) -> void:
 	body.position = at
 	add_child(body)
 	if visible_shell:
+		var segments := 3 if size.x > size.z and size.y > 0.05 else 1
+		for segment in segments:
+			make_wall_panel(size, at, segment, segments)
+
+func make_wall_panel(size: Vector3, at: Vector3, segment: int, segments: int) -> void:
 		var wall := MeshInstance3D.new()
 		wall.mesh = BoxMesh.new()
-		wall.mesh.size = size
-		wall.position = at
-		wall.set_meta(&"rest_position", at)
+		var panel_size := size
+		panel_size.x /= segments
+		wall.mesh.size = panel_size
+		wall.position = at + Vector3((segment - (segments - 1) / 2.0) * panel_size.x, 0, 0)
+		wall.set_meta(&"rest_position", wall.position)
+		wall.set_meta(&"long_face", segments > 1)
 		var material := StandardMaterial3D.new()
 		material.albedo_color = Color("#625d46")
 		material.roughness = 0.95
@@ -73,7 +83,7 @@ func make_boundary(size: Vector3, at: Vector3, visible_shell: bool) -> void:
 		for index in 4:
 			var seam := MeshInstance3D.new()
 			seam.mesh = BoxMesh.new()
-			seam.mesh.size = Vector3(size.x * 0.88, 0.002, 0.002) if size.x > size.z else Vector3(0.002, 0.002, size.z * 0.88)
+			seam.mesh.size = Vector3(panel_size.x * 0.88, 0.002, 0.002) if size.x > size.z else Vector3(0.002, 0.002, size.z * 0.88)
 			seam.position.y = -size.y * 0.4 + index * size.y * 0.25
 			seam.material_override = material
 			wall.add_child(seam)
@@ -143,7 +153,28 @@ func end_plow() -> void:
 		pusher.collision_layer = 0
 		pusher.position = Vector3(0, extent.y + 1, 0)
 
+func begin_drag(item: InteractableObject) -> void:
+	end_plow()
+	if proxies.has(item):
+		drag_item = item
+		drag_goal = proxies[item].position
+		proxies[item].sleeping = false
+
+func end_drag() -> void:
+	drag_item = null
+
 func _physics_process(delta: float) -> void:
+	if is_instance_valid(drag_item) and proxies.has(drag_item):
+		var body: RigidBody3D = proxies[drag_item]
+		var box := ContainerPacking.bounds(InventoryItem.from_body(drag_item), body.transform)
+		var relative_min := box.position - body.position
+		var relative_max := box.end - body.position
+		var low := Vector3(-extent.x / 2, 0, -extent.z / 2) - relative_min + Vector3.ONE * 0.003
+		var high := Vector3(extent.x / 2, extent.y, extent.z / 2) - relative_max - Vector3.ONE * 0.003
+		drag_goal = drag_goal.clamp(low, high)
+		var desired := ((drag_goal - body.position) * 9.0).limit_length(0.45)
+		var change := (desired - body.linear_velocity).limit_length(12.0 * delta)
+		body.apply_central_impulse((change + Vector3.UP * 9.8 * delta) * body.mass)
 	if plowing:
 		var radius := 0.025
 		var goal := plow_goal.clamp(Vector3(-extent.x / 2 + radius, radius, -extent.z / 2 + radius),
@@ -199,16 +230,24 @@ func _physics_process(delta: float) -> void:
 			body.linear_velocity = Vector3.ZERO
 			body.angular_velocity = Vector3.ZERO
 	for wall in walls:
-		var offset := Vector3.ZERO
-		if wall.position.y > 0:
-			for body: RigidBody3D in proxies.values():
-				var distance := absf(body.position.x - wall.position.x) if absf(wall.position.x) > extent.x / 2 else absf(body.position.z - wall.position.z)
-				if distance < 0.08:
-					offset = Vector3(signf(wall.position.x), 0, signf(wall.position.z)) * 0.007
 		var rest: Vector3 = wall.get_meta(&"rest_position")
+		var offset := Vector3.ZERO
+		if rest.y > 0:
+			for source in proxies:
+				var box := ContainerPacking.bounds(InventoryItem.from_body(source), proxies[source].transform)
+				var distance := absf(box.position.z - rest.z) if rest.z < -extent.z / 2 else absf(box.end.z - rest.z)
+				var local_x := absf(box.get_center().x - rest.x)
+				if wall.get_meta(&"long_face", false):
+					if distance < 0.04 and local_x < extent.x / 3:
+						offset.z = signf(rest.z) * 0.008
+				elif absf(rest.x) > extent.x / 2:
+					var side_distance := absf(box.position.x - rest.x) if rest.x < 0 else absf(box.end.x - rest.x)
+					if side_distance < 0.04:
+						offset.x = signf(rest.x) * 0.006
 		wall.position = wall.position.lerp(rest + offset, 1 - exp(-7 * delta))
 
 func capture() -> void:
+	end_drag()
 	end_plow()
 	for record in container.records():
 		if proxies.has(record.body):

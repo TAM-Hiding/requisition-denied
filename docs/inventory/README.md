@@ -85,4 +85,4 @@ Independent review found pending E input, mixed-inventory tool selection, incomp
 
 Known limits include approximate volume packing, one active tool slot, no persistence across process exits, and symbolic category icons. The preview is a visual snapshot refreshed on opening and equipment changes. Existing chassis animation and head/tool synchronization are preserved.
 
-RD-012 adds physical packing after the approximate checks, persisted packing metadata, and an on-demand interior. See [the satchel contract](../satchel/README.md) for current behavior.
+RD-012 adds physical packing after the approximate checks, persisted packing metadata, and an on-demand interior. Its playtest corrections provide 50 L nominal / 60 L expanded capacity at 25 kg, physical dragging with wheel height, RMB click/hold gestures, shared Bag View equipment actions and coordinated inversion dumping. The earlier RD-011 future-interface notes above describe the baseline, not the current controls. See [the satchel contract](../satchel/README.md) for current behavior.

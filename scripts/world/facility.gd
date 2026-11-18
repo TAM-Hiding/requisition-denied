@@ -416,45 +416,6 @@ func build_fastening_station(crate: InteractableObject, dark: Material, amber: M
 	bolt_tool.configure_removal(controls.removal_behavior, controls.removal_seconds)
 	bolt_tool.replenish()
 
-	var plate := stock_piece(&"RD-STOCK-PLATE", "Steel plate", 4.0,
-		Vector3(-4.65, 0.025, 3.8), Vector3(0.56, 0.035, 0.46), steel)
-	plate.name = "SteelPlate"
-	for index in 2:
-		var width := 0.32 if index == 0 else 0.58
-		var title := "Angle bracket" if index == 0 else "Long angle"
-		var angle := stock_piece(StringName("RD-STOCK-ANGLE-%d" % index), title, 3.0 + index,
-			Vector3(-4.15 - index * 0.68, 0.025, 2.75), Vector3(width, 0.036, 0.26), steel)
-		angle.name = "AngleBracket" if index == 0 else "LongAngle"
-		box(angle, "Flange", Vector3(width, 0.23, 0.033), Vector3(0, 0.116, -0.109), steel)
-		add_shape(angle, Vector3(width, 0.23, 0.033), Vector3(0, 0.116, -0.109))
-	stock_piece(&"RD-STOCK-BAR", "Steel bar", 5.0, Vector3(-4.9, 0.032, 3.28),
-		Vector3(0.48, 0.055, 0.11), steel).name = "SteelBar"
-	var gusset := InteractableObject.new()
-	gusset.name = "TriangularGusset"
-	gusset.definition = part_definition(&"RD-STOCK-GUSSET", "Triangular gusset", 2.0)
-	gusset.position = Vector3(-4.10, 0.026, 3.60)
-	var hull := ConvexPolygonShape3D.new()
-	hull.points = PackedVector3Array([
-		Vector3(-0.13, -0.02, -0.13), Vector3(0.13, -0.02, -0.13), Vector3(-0.13, -0.02, 0.13),
-		Vector3(-0.13, 0.02, -0.13), Vector3(0.13, 0.02, -0.13), Vector3(-0.13, 0.02, 0.13)])
-	var gusset_shape := CollisionShape3D.new()
-	gusset_shape.name = "CollisionShape3D"
-	gusset_shape.shape = hull
-	gusset.add_child(gusset_shape)
-	var triangle := MeshInstance3D.new()
-	triangle.name = "Model"
-	# Godot uses clockwise winding. The opaque prism and convex collider
-	# share the same six vertices in every interaction state.
-	var geometry := SurfaceTool.new()
-	geometry.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for vertex in [0, 2, 1, 3, 4, 5, 0, 4, 3, 0, 1, 4, 1, 5, 4, 1, 2, 5, 2, 3, 5, 2, 0, 3]:
-		geometry.add_vertex(hull.points[vertex])
-	geometry.generate_normals()
-	triangle.mesh = geometry.commit()
-	triangle.material_override = steel
-	gusset.add_child(triangle)
-	add_child(gusset)
-
 	# Recess the lower sides to expose fastening skids within the crate's
 	# existing footprint. The main body still blocks overlength drill paths.
 	var crate_model := crate.get_node("Model").get_child(0) as MeshInstance3D

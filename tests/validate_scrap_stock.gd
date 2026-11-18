@@ -30,6 +30,8 @@ func run() -> void:
 	var ui = facility.get_node("InteractionUI")
 	await frames(4)
 	check(supply.catalog.size() == 27, "27 authored stock variants")
+	for obsolete in ["SteelPlate", "AngleBracket", "LongAngle", "SteelBar", "TriangularGusset"]:
+		check(facility.get_node_or_null(obsolete) == null, "Obsolete chamber fixture removed: " + obsolete)
 	var all_ids := {}
 	for index in supply.catalog.size():
 		var data := supply.catalog[index]
@@ -118,8 +120,8 @@ func run() -> void:
 	await frames()
 	check(not is_instance_valid(loose) and is_instance_valid(first) and is_instance_valid(second)
 		and is_instance_valid(held) and is_instance_valid(facility.get_node("Crate"))
-		and is_instance_valid(facility.get_node("TriangularGusset")) and is_instance_valid(tool)
-		and is_instance_valid(rack) and supply.clear_loose() == 0, "Cleanup keeps assemblies, held stock and original fixtures")
+		and is_instance_valid(tool)
+		and is_instance_valid(rack) and supply.clear_loose() == 0, "Cleanup keeps assemblies, held stock and permanent fixtures")
 	actor.placement.set_input_suspended(false)
 	actor.placement.cancel()
 

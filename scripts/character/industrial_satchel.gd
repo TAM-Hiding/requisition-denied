@@ -1,5 +1,6 @@
 extends Node3D
 ## Cosmetic shell. It reads aggregate fullness and adds no physics bodies.
+@export var tuning: SatchelTuning = preload("res://data/inventory/satchel_tuning.tres")
 var container: InventoryContainer
 var shell: Node3D
 var target_scale := Vector3.ONE
@@ -21,7 +22,14 @@ func _ready() -> void:
 	for x in [-0.21, 0.21]:
 		add_box(shell, Vector3(0.04, 0.4, 0.027), Vector3(x, 0, 0.137), strap)
 		add_box(shell, Vector3(0.056, 0.034, 0.02), Vector3(x, 0.05, 0.156), trim)
-		add_box(self, Vector3(0.034, 0.29, 0.027), Vector3(x, 0.22, -0.14), strap)
+
+	var shoulder_strap := MeshInstance3D.new()
+	shoulder_strap.mesh = BoxMesh.new()
+	shoulder_strap.mesh.size = Vector3(0.044, 0.58, 0.028)
+	shoulder_strap.position = Vector3(-0.05, 0.28, -0.14)
+	shoulder_strap.rotation.z = deg_to_rad(-28)
+	shoulder_strap.material_override = strap
+	add_child(shoulder_strap)
 	add_box(shell, Vector3(0.22, 0.07, 0.012), Vector3(0, -0.05, 0.132), strap)
 	bind_container.call_deferred()
 
@@ -47,7 +55,8 @@ func update_fullness() -> void:
 		&"empty": target_scale = Vector3(0.94, 0.96, 0.62)
 		&"partially_full": target_scale = Vector3(0.98, 1.0, 0.86)
 		&"full": target_scale = Vector3(1.0, 1.0, 1.0)
-		&"bulging": target_scale = Vector3(1.04, 1.03, 1.12)
+		&"bulging": target_scale = Vector3(1.10, 1.08, 1.20)
 
 func _process(delta: float) -> void:
+	transform = tuning.attachment_transform()
 	shell.scale = shell.scale.lerp(target_scale, 1 - exp(-6 * delta))

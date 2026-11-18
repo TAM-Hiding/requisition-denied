@@ -61,7 +61,7 @@ func admission(item: InteractableObject, outgoing: InteractableObject = null) ->
 	if not size.is_finite() or size.x <= 0 or size.y <= 0 or size.z <= 0:
 		return "Item collision dimensions unavailable."
 	var item_axes := [size.x, size.y, size.z]
-	var opening := [definition.insertion_dimensions.x, definition.insertion_dimensions.y, definition.insertion_dimensions.z]
+	var opening := [definition.packing_dimensions().x, definition.packing_dimensions().y, definition.packing_dimensions().z]
 	item_axes.sort()
 	opening.sort()
 	for index in 3:
@@ -73,7 +73,7 @@ func admission(item: InteractableObject, outgoing: InteractableObject = null) ->
 	var volume := volume_m3() + record.volume_m3()
 	if contains(outgoing):
 		volume -= InventoryItem.from_body(outgoing).volume_m3()
-	if volume > definition.capacity_m3 + 0.000001:
+	if volume > definition.effective_capacity_m3() + 0.000001:
 		return "Container volume capacity exceeded."
 	if packing_validator.is_valid():
 		var issue: String = packing_validator.call(record)
@@ -85,7 +85,7 @@ func admission(item: InteractableObject, outgoing: InteractableObject = null) ->
 			if existing.body != outgoing:
 				candidates.append(existing)
 		candidates.append(record)
-		if ContainerPacking.plan(candidates, definition.insertion_dimensions).size() != candidates.size():
+		if ContainerPacking.plan(candidates, definition.packing_dimensions()).size() != candidates.size():
 			return "No reliable physical placement in the container."
 	return ""
 
@@ -126,7 +126,7 @@ func commit_remove(item: InteractableObject) -> void:
 func initialize_packing() -> bool:
 	if not definition.physical_packing or _records.is_empty():
 		return true
-	var poses := ContainerPacking.plan(records(), definition.insertion_dimensions)
+	var poses := ContainerPacking.plan(records(), definition.packing_dimensions())
 	if poses.size() != _records.size():
 		return false
 	for record: InventoryItem in poses:
@@ -182,7 +182,7 @@ func restore_manifest(data: Dictionary, registry: Dictionary) -> String:
 			return "Manifest requires world-state restoration before inventory resolution."
 		var dims := record.dimensions()
 		var axes := [dims.x, dims.y, dims.z]
-		var opening := [definition.insertion_dimensions.x, definition.insertion_dimensions.y, definition.insertion_dimensions.z]
+		var opening := [definition.packing_dimensions().x, definition.packing_dimensions().y, definition.packing_dimensions().z]
 		axes.sort()
 		opening.sort()
 		for index in 3:
@@ -196,14 +196,14 @@ func restore_manifest(data: Dictionary, registry: Dictionary) -> String:
 			return "Invalid item mass."
 		total_mass += item.mass
 		total_volume += record.volume_m3()
-		if total_mass > definition.maximum_mass_kg or total_volume > definition.capacity_m3:
+		if total_mass > definition.maximum_mass_kg or total_volume > definition.effective_capacity_m3():
 			return "Manifest exceeds container capacity."
 		record.internal_pose = pose
 		record.packed = entry.get("packed", false)
 		staged.append(record)
 		seen[id] = true
 	if definition.physical_packing:
-		var poses := ContainerPacking.plan(staged, definition.insertion_dimensions)
+		var poses := ContainerPacking.plan(staged, definition.packing_dimensions())
 		if poses.size() != staged.size():
 			return "Manifest has no reliable physical arrangement."
 		for record: InventoryItem in poses:

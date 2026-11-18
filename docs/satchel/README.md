@@ -1,71 +1,82 @@
 # Physical satchel
 
-Otis's industrial satchel attaches to the existing rear equipment mount. Its shell eases between empty, partial, full and bulging shapes based on authoritative container volume. It adds no gameplay collision bodies and uses the approved chassis animation.
+Otis's messenger satchel reads authoritative inventory fullness without changing the approved chassis, gait or collision body. Its lower, diagonal attachment and shoulder strap are cosmetic. Adjust the six attachment parameters in [`satchel_tuning.tres`](../../data/inventory/satchel_tuning.tres) through Godot's Inspector; the checked-in resource supplies the defaults. The same resource centralizes gesture thresholds, vertical steps and inversion safeguards.
 
-![External satchel](satchel-exterior.png)
-![Physical contents](bag-interior.png)
-![RMB plow demonstration](plow-demo.gif)
+![Revised messenger attachment](messenger-placement.png)
+![Larger physical bag view](revised-interior.png)
 
 ## Controls
 
-Open inventory with **T** and switch using **Bag View / Grid View**. Click a physical item to select it. The identity and properties appear in the inventory details. **Retrieve Selected** uses the same transfer operation and world-clearance checks as the grid. An equipped tool is excluded from bag retrieval.
+Open **T**, then choose **Bag View / Grid View**. Bag View temporarily borrows the character-preview column. Grid View restores the preview; **Q/E** retains preview rotation.
 
-Hold **RMB** inside Bag View and move the cursor to push contents. Releasing RMB, leaving the view, closing inventory or losing focus stops the plow. The small cursor ring changes colour during plowing. Grid right-click actions and normal gameplay RMB aiming retain their meanings.
+| Input inside Bag View | Behavior |
+| --- | --- |
+| LMB | Select an item |
+| Hold LMB + move | Physically drag it across the selected interaction plane |
+| Wheel | Raise/lower the selected item's target in 4 cm increments |
+| RMB click | Applicable Equip, Drop, Inspect and Cancel actions |
+| RMB hold + move | Plow after both 0.18 s and 6 pixels of movement |
+| MMB + move | Orbit; continue a deliberate vertical turn to invert the bag |
 
-Middle-mouse drag changes the bag viewpoint. The wheel adjusts its camera's field of view. **Q/E** continues to rotate the character preview. Normal cursor movement highlights and selects without applying forces.
+The wheel never zooms. Without selection it does nothing. During LMB dragging, wheel height persists until release. A wheel-only nudge on a selected item releases automatically after 0.4 seconds. Releasing LMB restores gravity. Dragging uses bounded impulses, gravity compensation and a maximum target-following speed of 0.45 m/s; existing item and container collisions remain authoritative.
 
-## One set of records
+RMB release ends Plow Mode immediately and cannot also open a context menu after the plow consumed the gesture. Releasing outside the view, closing inventory or losing focus cancels the gesture. Gameplay RMB aiming and Grid View actions retain their meanings.
 
-InventoryItem retains the real object and its gameplay state. The isolated ContainerInterior creates temporary RigidBody3D representations using those objects' existing collision shapes, mesh geometry and mass. It adds no copies of the authoritative InteractableObject, tool logic or ammunition.
+![Short-click actions versus held plowing](gestures-demo.gif)
+![Recovering a floor-resting gusset vertically](vertical-demo.gif)
 
-BagView creates a SubViewport with its own World3D only while inspected. On close, it saves the rigid-body transforms to each record, removes the viewport and releases the temporary physics world. The physical arrangement remains in the existing version-1 manifest through internal_pose plus an optional packed flag. Old records missing that flag initialize through the same packing stage. If a legacy arrangement cannot be made safely, items remain owned and available through the grid with a clear message.
+## Shared ownership and item actions
 
-A ContainerDefinition can enable physical_packing and supply a compatible ContainerInterior scene. The initial satchel uses the default procedural interior. Other container kinds can reuse this contract and replace the shell later.
+Bag and Grid actions call the same equipment controller. Equip supports the existing transactional slot swap; an unstoreable displaced item rejects the swap. Inspect displays identity, condition, mass, dimensions and relevant metadata without transferring ownership. The original object retains ammunition and mutable state.
 
-## Capacity and packing
+InventoryItem retains the real object. ContainerInterior creates temporary RigidBody3D representations from its actual collision shapes, meshes and mass. It adds no authoritative InteractableObject, tool logic or ammunition. BagView owns a separate World3D only while inspected. Closing captures packing transforms and destroys that simulation. The existing version-1 manifest retains `internal_pose` and the optional `packed` flag; legacy records initialize through the same packing stage. Unsafe legacy arrangements remain available through Grid View with feedback.
+
+The character preview now poses its visual copy from current equipment ownership on every refresh. Unequipping immediately restores its neutral arm and corrected wrist. Equipped wrist flexion is bounded; tool presentation compensates its transform to preserve existing head-oriented aiming. Chassis geometry, chirality, walking animation and head synchronization are unchanged.
+
+## Inversion and natural world drops
+
+Ordinary horizontal orbit does not dump. Vertical MMB movement first adjusts inspection angle, then visibly turns the bag about its center. Holding its opening at least **155° from up for 0.35 seconds** initiates dumping. Releasing an incomplete turn returns it upright. Bag proxies pause during the turn; this is a presentation transition rather than continuous gravity simulation across worlds.
+
+The short visual sequence closes inventory and calls a coordinated equipment-controller batch. Individual Drop and batch dumping share full-shape forward-arc release searches: varied angular/radial positions roughly 0.7–1.75 m ahead, accessible surfaces, collision-safe paths, same-frame pose reservations and staggered releases. World physics settles the actual objects. Normal gameplay **G** dropping retains its existing aimed placement behavior.
+
+Failed releases remain stored. Partial dumps report released and retained counts, preserve identities and update fullness from actual inventory. Dumping locks competing transfers and UI close/view changes until the visual handoff completes. Reopening cannot reuse an old inversion angle.
+
+![Deliberate inversion and world release](dump-demo.gif)
+![Released objects in the Facility](dumped-pile.png)
+
+## Capacity and bounded expansion
 
 | Configuration | Value |
 | --- | --- |
-| Effective capacity | 50 L |
+| Nominal capacity | 50 L |
+| Maximum expanded capacity | 60 L |
 | Independent structural rating | 25 kg |
-| Internal envelope | 64 × 40 × 26 cm |
-| Envelope volume | 66.56 L |
-| Effective-volume fraction | About 75% of the envelope |
+| Base envelope | 64 × 40 × 26 cm |
+| Maximum packing/collision envelope | 68 × 42 × 28 cm |
 | Initial packing orientations | Six axis permutations |
-| Placement search | At most 4,096 candidate poses per new item |
+| Search bound per new item | 4,096 poses |
 
-The envelope leaves room for loose packing around the nominal 50 L payload. Items retain their world dimensions and scale. RD-011's aggregate bounding-volume estimate remains intentionally conservative, especially for angle stock and hollow tubing. The capacity increase is implemented through container configuration, without shrinking contents or changing mass.
+The maximum envelope reserves the expansion allowance in advance. Admission, physical packing, containment and display use that same envelope; the volume limit remains 60 L. This is bounded expansion with rigid collision walls, rather than continuous cloth deformation. Six visible pleats, three on each long face, respond modestly to nearby contents. Their displacement is bounded to about 8 mm. The external shell becomes more distended through empty, partial, full and bulging states; the UI labels storage above 50 L as expanded.
 
-Admission first applies volume, structural mass and sorted dimensions. The bounded physical packing stage then checks actual collision geometry for existing arrangements and uses conservative bounding boxes for new placements. Existing valid poses survive unchanged. New poses are staged before storage commits. Equipment swaps test packing after excluding the outgoing stored item.
+Admission applies effective volume, structural mass, dimensions and actual packing clearance. New placements are staged before committing a transfer. Existing safe poses remain unchanged; swaps exclude the outgoing item while testing admission. Actual object dimensions and mass are retained. RD-011's aggregate bounding-volume estimate remains conservative, especially for hollow or angle stock.
 
-Packing queries use a temporary physics space that is freed before returning. There is no continuous closed-bag simulation. More elaborate shape nesting or exhaustive packing is outside this revision. A cluttered bag may reject a physically possible placement when the bounded search cannot find it.
+## Verification and independent review
 
-## Physics and containment
+`GODOT_BIN=/path/to/Godot_v4.7.2-stable_linux.x86_64 bash tests/validate.sh` runs the complete RD-001–RD-012 suite, including 38 shared world-drop checks and 40 playtest-correction checks. The candidate passed **1,445 checks with zero failures**, plus fresh editor import and main-scene smoke runs. The configuration test verifies Jolt and Compatibility rendering and checks `project.godot` normalization.
 
-The interior uses a rigid floor, side boundaries and an invisible containment lid. Rendered fabric walls can move outward by up to 7 mm near contents, then recover. Those visual offsets never move the collision boundaries.
+Coverage includes click/hold discrimination, direct equipment and preserved ammunition, preview reset, generated-gusset lifting and settling, wheel-only nudges, bounded pleats, inversion dwell, batch/partial failures, identity preservation, reopening during a partial turn, 57.6 L physical packing, and rejection above 60 L. Existing suites cover safe equipment swapping, structural groups, heavy dragging, hollow stock, aim-to-hold and dispenser occupancy. Obsolete authored scrap fixtures were removed; structural tests now dispense catalog stock, including the triangular gusset.
 
-Plow movement uses a swept sphere capped at 0.45 m/s, an additional 6 mm contact-assistance envelope and bounded impulses. Top contacts produce tangential pushes rather than increasing the load against the floor. Actual item rotation and object-to-object contact remain Godot physics. Speed limits preserve newly submitted impulses. A defensive containment check restores the last in-bounds transform only if a proxy escapes beyond the small contact tolerance.
+Independent review found stale inversion state on reopening, empty-bag restoration and UI changes interrupting the dump tween. These were corrected and covered. Investigation also found an unconditional parent transform reset cancelling physical drag impulses; upright restoration now writes a transform only when needed. Final independent review reported no remaining blockers.
 
-The plow can reach the top of a nearly full bag while the item containment lid remains solid. This is a virtual inspection tool. It does not transfer force into the Facility or change Otis's lift limits.
-
-## Verification and review
-
-Run tests/validate.sh with GODOT_BIN set to Godot 4.7.2. The satchel suite covers packing rollback, shared identities, persisted transforms, legacy records, selection, mouse-event plowing/release, equipment, repeated inspection and near-full containment.
-
-A 40-object load occupies about 46 L. It passed 90 physics frames without escape, then released its simulation on close. That test took about 1.5 seconds at the normal 60 Hz headless cadence, including those frames. This is a stability observation, rather than a hardware performance benchmark. No arbitrary inventory item-count limit is introduced.
-
-Independent review caught an initial top-contact gap, a velocity clamp that erased new impulses, asymmetric containment tolerance, inaccessible-container inspection and a bag-retrieval selection guard. These were corrected. The primary implementer reviewed the delegated velocity correction and verified the mouse-event and graphical tests.
-
-The GitHub Actions workflow runs the complete headless suite and verifies that project.godot stays unchanged.
+Graphical captures use the real Godot 4.7.2 Compatibility renderer with software OpenGL on Linux. They exercise mouse events and actual proxy physics. They are reproducible demonstrations, not a hardware responsiveness benchmark or a substitute for the user's Ubuntu playtest.
 
 ## Manual acceptance
 
-1. Store a wrench and several small pieces of scrap, equip Uni-Bolt and open T. Rotate the preview to inspect the satchel.
-2. Switch to Bag View. Hover and select items. Drag while holding RMB, then release and select normally.
-3. Use middle-mouse drag and the wheel to inspect around a larger object. Verify that the selected item's identity matches the grid.
-4. Leave Bag View and reopen it. Confirm that the arrangement persists. Close inventory and check ordinary movement and aiming.
-5. Retrieve an item from Bag View, then repeat with blocked world clearance. A failed retrieval must retain the same stored item.
-6. Equip and unequip through the grid, add items until either mass, effective volume or physical placement is rejected, and verify the rejection preserves ownership.
-7. Recheck precision placement, heavy dragging, the hydraulic ram, structural failures and Uni-Bolt aim-to-hold stabilization.
+1. Dispense a gusset, flat bar and other small stock; store them with a wrench and Uni-Bolt. Open T and rotate the preview to inspect the slung satchel.
+2. Select Bag View. Short RMB-click an item; Inspect it, Equip directly, and verify current tool state. Unequip through the equipment slot; check the neutral preview in Grid View.
+3. Hold RMB and move; release and verify no context menu. LMB-drag a floor-resting gusset and use the wheel to lift it, then release to settle. Repeat with stacked tools and buried stock.
+4. MMB orbit horizontally, then return. Continue a deliberate vertical turn past inversion and wait for the dump. Check the loose world pile, identities, ammunition and bag fullness. Repeat near blocked geometry; failures must remain stored with feedback.
+5. Close during a partial turn and reopen; confirm upright contents and normal manipulation. Close inventory and verify movement, ADS, precision placement and aim-to-hold.
+6. Check expanded volume and the independent 25 kg rating, delivery-pad occupancy, hydraulic loading and structural separation.
 
-Packing remains conservative. Individual objects cannot yet be lifted by the cursor or dumped from the bag. The shell deforms visually using rigid panels, rather than cloth. Items below other items may need rummaging or a different view angle for selection. World save/load remains outside scope.
+Packing is a bounded conservative search. Hidden items can require rummaging or a different viewpoint for selection. Pleats and shell expansion are visual, using a fixed maximum collision envelope. Inversion is an abstracted batch transfer. Crowded world geometry can retain some items. Full cloth, exhaustive nesting and world save/load remain outside scope.

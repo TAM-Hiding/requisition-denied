@@ -71,10 +71,10 @@ func run() -> void:
 	rig.animate(1.0, true, false)
 	var pitch := clampf(actor.camera.rotation.x, -0.32, 0.38) - float(rig.limbs[1].shoulder.rotation.x) \
 		- float(rig.limbs[1].forearm.rotation.x)
-	check(hand.basis.is_equal_approx(Basis(Vector3.RIGHT, pitch))
+	check(hand.basis.is_equal_approx(Basis(Vector3.RIGHT, clampf(pitch, -0.70, 0.70)))
 		and grip.transform == Transform3D(Basis.IDENTITY, Vector3(0, -0.091, -0.035))
 		and alignment.transform == grip.transform,
-		"Aiming restores the original forward grip basis and exact tool sockets")
+		"Aiming bounds wrist flexion while preserving the exact grip sockets")
 	actor.set_tool_aiming(false)
 	rig.set_inspection(0)
 	check(actor.camera.is_current() and not rig.visible and rig.display_meshes.is_empty()
