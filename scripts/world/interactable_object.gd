@@ -4,6 +4,8 @@ extends RigidBody3D
 enum State { WORLD, HELD, STOWED, MOVING, CARRIED }
 @export var definition: ObjectDefinition
 var state: State = State.WORLD
+var storage_owner: InventoryContainer
+var equipment_owner: Node
 var fastened := false
 var fastening_system: FasteningSystem
 var support_carrier: CharacterBody3D
@@ -51,6 +53,17 @@ func assembly_root() -> PhysicsBody3D:
 		return null
 	return fastening_system.connected_root(self)
 
+func compatible_equipment_slots() -> Array[StringName]:
+	if not definition.equipment_slots.is_empty():
+		return definition.equipment_slots.duplicate()
+	return [&"tool"] if mobility() == ObjectDefinition.Mobility.CARRYABLE else []
+
+func inventory_state() -> Dictionary:
+	var metadata := {}
+	for key in get_meta_list():
+		metadata[key] = get_meta(key)
+	return {"condition": definition.condition, "properties": definition.properties.duplicate(true), "metadata": metadata}
+
 func query_actions() -> Array[StringName]:
 	var actions: Array[StringName] = []
 	if definition == null or state not in [State.WORLD, State.MOVING]:
@@ -65,6 +78,7 @@ func query_actions() -> Array[StringName]:
 			actions.append(&"pick_up")
 		if root_body != null and root_body.state == State.WORLD and root_body.mobility() != ObjectDefinition.Mobility.FIXED:
 			actions.append(&"move")
+			actions.append(&"store")
 	return actions
 
 func _integrate_forces(body: PhysicsDirectBodyState3D) -> void:

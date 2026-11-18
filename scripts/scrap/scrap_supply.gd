@@ -31,6 +31,7 @@ func dispense(index: int) -> InteractableObject:
 	part.definition.object_id = StringName("RD-SCRAP-%d" % next_id)
 	part.definition.display_name = entry.title
 	part.definition.mass_kg = entry.mass
+	part.definition.properties["inventory_icon"] = entry.icon
 	part.definition.mobility = ObjectDefinition.Mobility.MOVABLE
 	part.definition.description = "Rigid steel development stock. %s." % dimensions(entry.size)
 	part.set_meta(PROVENANCE, true)

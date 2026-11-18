@@ -24,11 +24,13 @@ func request(action: StringName, actor: Node3D, camera: Camera3D,
 			return {"ok": false, "message": "Place or cancel the current object first."}
 		var issue: String = target.installed_mount.remove()
 		return {"ok": issue.is_empty(), "message": issue}
-	if action in [&"pick_up", &"move"]:
+	if action in [&"pick_up", &"move", &"store"]:
 		if not actor is OtisController:
 			return {"ok": false, "message": "Actor has no equipment controller."}
 		if actor.placement.is_active():
 			return {"ok": false, "message": "Place or cancel the current object first."}
+		if action == &"store":
+			return actor.equipment.store_world(target)
 		if action == &"pick_up":
 			return actor.equipment.pick_up(target)
 		var accepted: bool = (actor as OtisController).placement.begin_world(target)
@@ -45,9 +47,9 @@ func request_actor_action(action: StringName, actor: OtisController) -> Dictiona
 	if not is_instance_valid(actor) or actor.equipment == null or not actor.controls_enabled:
 		return {"ok": false, "message": "Equipment unavailable."}
 	if actor.placement.is_active():
-		var stored := actor.equipment.stored_items()
+		var first := actor.equipment.first_equippable()
 		if not (action == &"equip_first" and actor.placement.is_grabbing()
-				and not actor.placement.is_seating() and not stored.is_empty() and stored[0] is FasteningTool):
+				and not actor.placement.is_seating() and first is FasteningTool):
 			return {"ok": false, "message": "Place or cancel the current object first."}
 	match action:
 		&"stow": return actor.equipment.stow()
