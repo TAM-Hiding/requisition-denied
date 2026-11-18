@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ChassisModuleDefinition" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/character/chassis_module_definition.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/character/upper_arm.tscn" id="2"]
+
+[resource]
+script = ExtResource("1")
+module_id = &"icf01.upper_arm"
+category = &"upper_arm"
+mounting_interface = &"shoulder"
+visual_scene = ExtResource("2")
+attachment_sockets = Array[StringName]([&"ShoulderConnection", &"ElbowConnection"])
+cosmetic_label = "Upper Arm"

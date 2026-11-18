@@ -1,0 +1,16 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/character/wayfarer_geometry.gd" id="1"]
+
+[node name="Hand" type="Node3D"]
+script = ExtResource("1")
+section = &"hand"
+
+[node name="WristConnection" type="Marker3D" parent="."]
+position = Vector3(0, 0, 0)
+
+[node name="PrimaryGrip" type="Marker3D" parent="."]
+position = Vector3(0, -0.091, -0.035)
+
+[node name="ToolAlignment" type="Marker3D" parent="."]
+position = Vector3(0, -0.091, -0.035)

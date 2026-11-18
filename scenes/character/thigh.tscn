@@ -1,0 +1,13 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/character/wayfarer_geometry.gd" id="1"]
+
+[node name="Thigh" type="Node3D"]
+script = ExtResource("1")
+section = &"thigh"
+
+[node name="HipConnection" type="Marker3D" parent="."]
+position = Vector3(0, 0, 0)
+
+[node name="KneeConnection" type="Marker3D" parent="."]
+position = Vector3(0, -0.43, 0)

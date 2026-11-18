@@ -1,0 +1,28 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/character/wayfarer_geometry.gd" id="1"]
+
+[node name="Core" type="Node3D"]
+script = ExtResource("1")
+section = &"core"
+
+[node name="HeadMount" type="Marker3D" parent="."]
+position = Vector3(0, 0.70, -0.036)
+
+[node name="LeftShoulderMount" type="Marker3D" parent="."]
+position = Vector3(-0.204, 0.525, 0)
+
+[node name="RightShoulderMount" type="Marker3D" parent="."]
+position = Vector3(0.204, 0.525, 0)
+
+[node name="LeftHipMount" type="Marker3D" parent="."]
+position = Vector3(-0.1, 0, 0)
+
+[node name="RightHipMount" type="Marker3D" parent="."]
+position = Vector3(0.1, 0, 0)
+
+[node name="RearEquipmentMount" type="Marker3D" parent="."]
+position = Vector3(0, 0.35, 0.167)
+
+[node name="WaistEquipmentMount" type="Marker3D" parent="."]
+position = Vector3(0.14, 0.065, 0.035)
