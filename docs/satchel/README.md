@@ -13,12 +13,12 @@ Open **T**, then choose **Bag View / Grid View**. Bag View temporarily borrows t
 | --- | --- |
 | LMB | Select an item |
 | Hold LMB + move | Physically drag it across the selected interaction plane |
-| Wheel | Raise/lower the selected item's target in 4 cm increments |
+| Wheel down / up | Raise / lower the selected item's target in configurable 8 cm increments |
 | RMB click | Applicable Equip, Drop, Inspect and Cancel actions |
 | RMB hold + move | Plow after both 0.18 s and 6 pixels of movement |
 | MMB + move | Orbit; continue a deliberate vertical turn to invert the bag |
 
-The wheel never zooms. Without selection it does nothing. During LMB dragging, wheel height persists until release. A wheel-only nudge on a selected item releases automatically after 0.4 seconds. Releasing LMB restores gravity. Dragging uses bounded impulses, gravity compensation and a maximum target-following speed of 0.45 m/s; existing item and container collisions remain authoritative.
+The wheel never zooms. Without selection it does nothing. LMB dragging or wheel movement acquires a physical hold; releasing LMB retains its target height. Resume dragging to rearrange it horizontally at that height. Click empty bag space to release it to gravity. Dragging uses bounded impulses, gravity compensation and a maximum target-following speed of 0.45 m/s; existing item and container collisions remain authoritative. The on-screen hint distinguishes selected, held, returning and ready-to-drop states.
 
 RMB release ends Plow Mode immediately and cannot also open a context menu after the plow consumed the gesture. Releasing outside the view, closing inventory or losing focus cancels the gesture. Gameplay RMB aiming and Grid View actions retain their meanings.
 
@@ -44,6 +44,14 @@ Failed releases remain stored. Partial dumps report released and retained counts
 ![Deliberate inversion and world release](dump-demo.gif)
 ![Released objects in the Facility](dumped-pile.png)
 
+## Taking an item through the opening
+
+Lift an item until its entire collision volume clears the top by **25 mm**. Its cursor and status show **READY TO DROP**. Release an active LMB drag, or click empty space, to use the same transactional world Drop as the context menu. Boundary crossing alone never transfers ownership. A failed world placement reports the rejection and retains the original item safely in storage.
+
+Only the held proxy bypasses its containment lid. Side walls and other items remain solid. Cancelling a partial exit returns the item through the opening using the same bounded physical controller, then restores its lid. Re-selecting resumes from its current height. Closing the interface cancels the temporary preview without saving a fully extracted packing pose. Inversion waits for an unfinished partial exit to return; its threshold and dwell remain unchanged.
+
+The general proxy setup keeps four reported contacts, preserving Jolt's compound support manifolds for thin hollow stock without monitor signals. Tubes retain their original outer/inner dimensions and hollow collision geometry. See [the floor-contact investigation, controls and extraction report](physical-bag-controls.md).
+
 ## Capacity and bounded expansion
 
 | Configuration | Value |
@@ -62,9 +70,9 @@ Admission applies effective volume, structural mass, dimensions and actual packi
 
 ## Verification and independent review
 
-`GODOT_BIN=/path/to/Godot_v4.7.2-stable_linux.x86_64 bash tests/validate.sh` runs the complete RD-001–RD-012 suite, including 38 shared world-drop checks and 40 playtest-correction checks. The candidate passed **1,445 checks with zero failures**, plus fresh editor import and main-scene smoke runs. The configuration test verifies Jolt and Compatibility rendering and checks `project.godot` normalization.
+`GODOT_BIN=/path/to/Godot_v4.7.2-stable_linux.x86_64 bash tests/validate.sh` runs the complete RD-001–RD-012 suite, including 38 shared world-drop checks, 40 playtest-correction checks, 111 round-stock checks and 75 opening/control checks. The full suite contains **1,631 checks**, plus fresh editor import and main-scene smoke runs. The configuration test verifies Jolt and Compatibility rendering and checks `project.godot` normalization.
 
-Coverage includes click/hold discrimination, direct equipment and preserved ammunition, preview reset, generated-gusset lifting and settling, wheel-only nudges, bounded pleats, inversion dwell, batch/partial failures, identity preservation, reopening during a partial turn, 57.6 L physical packing, and rejection above 60 L. Existing suites cover safe equipment swapping, structural groups, heavy dragging, hollow stock, aim-to-hold and dispenser occupancy. Obsolete authored scrap fixtures were removed; structural tests now dispense catalog stock, including the triangular gusset.
+Coverage includes click/hold discrimination, direct equipment and preserved ammunition, preview reset, generated-gusset lifting and settling, persistent wheel holds, bounded pleats, inversion dwell, batch/partial failures, identity preservation, reopening during a partial turn, 57.6 L physical packing, and rejection above 60 L. Existing suites cover safe equipment swapping, structural groups, heavy dragging, hollow stock, aim-to-hold and dispenser occupancy. Obsolete authored scrap fixtures were removed; structural tests now dispense catalog stock, including the triangular gusset.
 
 Independent review found stale inversion state on reopening, empty-bag restoration and UI changes interrupting the dump tween. These were corrected and covered. Investigation also found an unconditional parent transform reset cancelling physical drag impulses; upright restoration now writes a transform only when needed. Final independent review reported no remaining blockers.
 
@@ -74,7 +82,7 @@ Graphical captures use the real Godot 4.7.2 Compatibility renderer with software
 
 1. Dispense a gusset, flat bar and other small stock; store them with a wrench and Uni-Bolt. Open T and rotate the preview to inspect the slung satchel.
 2. Select Bag View. Short RMB-click an item; Inspect it, Equip directly, and verify current tool state. Unequip through the equipment slot; check the neutral preview in Grid View.
-3. Hold RMB and move; release and verify no context menu. LMB-drag a floor-resting gusset and use the wheel to lift it, then release to settle. Repeat with stacked tools and buried stock.
+3. Hold RMB and move; release and verify no context menu. LMB-drag a floor-resting gusset and use the wheel down to lift it, release LMB to hold, then click empty space to settle. Repeat with stacked tools and buried stock.
 4. MMB orbit horizontally, then return. Continue a deliberate vertical turn past inversion and wait for the dump. Check the loose world pile, identities, ammunition and bag fullness. Repeat near blocked geometry; failures must remain stored with feedback.
 5. Close during a partial turn and reopen; confirm upright contents and normal manipulation. Close inventory and verify movement, ADS, precision placement and aim-to-hold.
 6. Check expanded volume and the independent 25 kg rating, delivery-pad occupancy, hydraulic loading and structural separation.

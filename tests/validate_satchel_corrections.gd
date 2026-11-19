@@ -103,11 +103,13 @@ func run() -> void:
 	var y := proxy.position.y
 	var fov := bag.camera.fov
 	for i in 4:
-		mouse(bag, MOUSE_BUTTON_WHEEL_UP, true, pointer)
+		mouse(bag, MOUSE_BUTTON_WHEEL_DOWN, true, pointer)
 	await frames(50)
 	check(proxy.position.y > y + 0.06 and bag.camera.fov == fov, "Wheel raises the selected manipulation target without camera zoom")
 	mouse(bag, MOUSE_BUTTON_LEFT, false, pointer)
-	check(bag.interior.drag_item == null, "Releasing LMB returns the item to ordinary gravity")
+	check(bag.interior.drag_item == gusset, "Releasing LMB preserves the physical hold")
+	mouse(bag, MOUSE_BUTTON_LEFT, true, Vector2(5, 5))
+	mouse(bag, MOUSE_BUTTON_LEFT, false, Vector2(5, 5))
 	var raised := proxy.position.y
 	await frames(45)
 	check(proxy.position.y < raised - 0.03, "Released item settles back into the bag")
@@ -117,14 +119,16 @@ func run() -> void:
 		"Both long faces have three bounded pleats")
 	var resting := proxy.position.y
 	bag.selected = gusset
-	mouse(bag, MOUSE_BUTTON_WHEEL_UP, true, pointer)
+	mouse(bag, MOUSE_BUTTON_WHEEL_DOWN, true, pointer)
 	await frames(12)
 	check(proxy.position.y > resting + 0.01, "A selected item also accepts a brief wheel-only vertical nudge")
 	await frames(35)
-	check(bag.interior.drag_item == null, "A wheel-only nudge releases automatically")
+	check(bag.interior.drag_item == gusset, "Wheel-only manipulation remains held until deliberately released")
+	mouse(bag, MOUSE_BUTTON_LEFT, true, Vector2(5, 5))
+	mouse(bag, MOUSE_BUTTON_LEFT, false, Vector2(5, 5))
 	var saved_fov := bag.camera.fov
 	bag.selected = null
-	mouse(bag, MOUSE_BUTTON_WHEEL_UP, true, pointer)
+	mouse(bag, MOUSE_BUTTON_WHEEL_DOWN, true, pointer)
 	check(bag.camera.fov == saved_fov and bag.interior.drag_item == null, "Wheel with no selected drag does nothing")
 	# Horizontal orbit must not invert the bag. A deliberate vertical turn does.
 	var yaw := bag.view_yaw

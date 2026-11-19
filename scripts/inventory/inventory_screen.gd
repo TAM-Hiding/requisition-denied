@@ -106,8 +106,12 @@ func _ready() -> void:
 	bag.item_selected.connect(select_item)
 	bag.context_requested.connect(bag_context)
 	bag.dump_requested.connect(dump_bag)
+	bag.drag_drop_requested.connect(drop_from_opening)
 	bag_panel.add_child(bag)
-	bag_panel.add_child(label("LMB DRAG • WHEEL HEIGHT\nRMB CLICK ACTIONS / HOLD PLOW • MMB TURN BAG", 12))
+	var hold_hint := label("SELECT AN ITEM • CLICK EMPTY SPACE TO RELEASE", 12)
+	bag.manipulation_changed.connect(func(text: String) -> void: hold_hint.text = text)
+	bag_panel.add_child(hold_hint)
+	bag_panel.add_child(label("LMB DRAG • WHEEL DOWN RAISES / UP LOWERS\nRMB CLICK ACTIONS / HOLD PLOW • MMB TURN BAG", 12))
 	bag_panel.hide()
 	grid_scroll = ScrollContainer.new()
 	grid_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -199,7 +203,8 @@ func route(event: InputEvent) -> void:
 		if not bag.get_global_rect().has_point(event.position):
 			bag.release_right(false)
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-		bag.end_drag()
+		if not bag.get_global_rect().has_point(event.position):
+			bag.finish_pointer_drag()
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and not event.pressed:
 		bag.orbiting = false
 	if event.is_action_pressed("inventory_toggle") or event.is_action_pressed("ui_cancel"):
@@ -354,6 +359,13 @@ func bag_context(item: InteractableObject) -> void:
 	popup.add_item("Cancel", 4)
 	popup.position = Vector2i(get_viewport().get_mouse_position())
 	popup.popup()
+
+func drop_from_opening(item: InteractableObject) -> void:
+	if not bag.active or not bag.interior.can_extract(item):
+		return
+	select_item(item)
+	# Same collision-safe, transactional transfer as context-menu Drop.
+	perform_action(2)
 
 func dump_bag() -> void:
 	if _dump_sequence:

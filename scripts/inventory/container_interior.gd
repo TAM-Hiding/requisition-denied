@@ -8,8 +8,11 @@ var proxies: Dictionary = {}
 var safe_poses: Dictionary = {}
 var walls: Array[Node3D] = []
 var pusher: AnimatableBody3D
+var lid: StaticBody3D
+var exit_clearance := 0.025
 var plowing := false
 var drag_item: InteractableObject
+var returning := false
 var drag_goal := Vector3.ZERO
 var plow_goal := Vector3.ZERO
 var plow_plane_y := 0.0
@@ -58,6 +61,8 @@ func _ready() -> void:
 
 func make_boundary(size: Vector3, at: Vector3, visible_shell: bool) -> void:
 	var body := StaticBody3D.new()
+	if not visible_shell:
+		lid = body
 	body.collision_layer = 4 if visible_shell else 8
 	body.collision_mask = 1 | 2
 	var shape := CollisionShape3D.new()
@@ -101,6 +106,10 @@ func make_proxy(record: InventoryItem) -> void:
 	body.name = "Packing_" + String(source.definition.object_id)
 	body.mass = source.mass
 	body.continuous_cd = true
+	# Positive contact reporting disables Jolt compound manifold reduction.
+	# Preserve the exterior contacts of thin convex/hollow stock; no contact
+	# monitor or per-frame contact logging is needed.
+	body.max_contacts_reported = 4
 	body.linear_damp = 3.0
 	body.angular_damp = 5.0
 	body.collision_layer = 1
@@ -160,24 +169,63 @@ func end_plow() -> void:
 		pusher.collision_layer = 0
 		pusher.position = Vector3(0, extent.y + 1, 0)
 
-func begin_drag(item: InteractableObject) -> void:
+func begin_drag(item: InteractableObject) -> bool:
 	end_plow()
-	if proxies.has(item):
-		drag_item = item
-		drag_goal = proxies[item].position
-		proxies[item].sleeping = false
+	if drag_item == item:
+		if returning:
+			drag_goal = proxies[item].position
+		returning = false
+		return true
+	end_drag()
+	if drag_item != null or not proxies.has(item):
+		return false
+	drag_item = item
+	drag_goal = proxies[item].position
+	proxies[item].sleeping = false
+	proxies[item].add_collision_exception_with(lid)
+	return true
 
-func end_drag() -> void:
+func end_drag(force := false) -> void:
+	if is_instance_valid(drag_item) and proxies.has(drag_item):
+		var body: RigidBody3D = proxies[drag_item]
+		var box := ContainerPacking.bounds(InventoryItem.from_body(drag_item), body.transform)
+		if not force and box.end.y > extent.y:
+			# A cancelled partial exit returns through the opening with the same
+			# bounded physical controller before restoring its containment lid.
+			returning = true
+			drag_goal.y = minf(drag_goal.y, body.position.y + extent.y - box.end.y - 0.004)
+			return
+		body.remove_collision_exception_with(lid)
 	drag_item = null
+	returning = false
+
+func can_extract(item: InteractableObject) -> bool:
+	if returning or item != drag_item or not proxies.has(item):
+		return false
+	var box := ContainerPacking.bounds(InventoryItem.from_body(item), proxies[item].transform)
+	return box.position.y >= extent.y + exit_clearance \
+		and box.position.x >= -extent.x / 2 and box.end.x <= extent.x / 2 \
+		and box.position.z >= -extent.z / 2 and box.end.z <= extent.z / 2
+
+func contained(box: AABB, item: InteractableObject) -> bool:
+	var envelope := extent
+	if item == drag_item:
+		# The selected body can leave through the open top only. Other loose
+		# bodies retain their lid; neither side-wall collision is disabled.
+		envelope.y += box.size.y + exit_clearance + 0.08
+	return ContainerPacking.inside(box, envelope, containment_tolerance)
 
 func _physics_process(delta: float) -> void:
 	if is_instance_valid(drag_item) and proxies.has(drag_item):
 		var body: RigidBody3D = proxies[drag_item]
 		var box := ContainerPacking.bounds(InventoryItem.from_body(drag_item), body.transform)
+		if returning:
+			drag_goal.y = minf(drag_goal.y, body.position.y + extent.y - box.end.y - 0.004)
 		var relative_min := box.position - body.position
 		var relative_max := box.end - body.position
 		var low := Vector3(-extent.x / 2, 0, -extent.z / 2) - relative_min + Vector3.ONE * 0.003
-		var high := Vector3(extent.x / 2, extent.y, extent.z / 2) - relative_max - Vector3.ONE * 0.003
+		var high := Vector3(extent.x / 2, extent.y + box.size.y + exit_clearance + 0.08,
+			extent.z / 2) - relative_max - Vector3.ONE * 0.003
 		drag_goal = drag_goal.clamp(low, high)
 		var desired := ((drag_goal - body.position) * 9.0).limit_length(0.45)
 		var change := (desired - body.linear_velocity).limit_length(12.0 * delta)
@@ -230,12 +278,17 @@ func _physics_process(delta: float) -> void:
 		var record := InventoryItem.from_body(source)
 		var box := ContainerPacking.bounds(record, body.transform)
 		# The physical walls are primary. Recover only an invalid escaped pose.
-		if ContainerPacking.inside(box, extent, containment_tolerance):
-			safe_poses[source] = body.transform
+		if contained(box, source):
+			if ContainerPacking.inside(box, extent, containment_tolerance):
+				safe_poses[source] = body.transform
 		else:
 			body.transform = safe_poses[source]
 			body.linear_velocity = Vector3.ZERO
 			body.angular_velocity = Vector3.ZERO
+	if returning and is_instance_valid(drag_item):
+		var box := ContainerPacking.bounds(InventoryItem.from_body(drag_item), proxies[drag_item].transform)
+		if box.end.y <= extent.y - 0.001:
+			end_drag(true)
 	for wall in walls:
 		var rest: Vector3 = wall.get_meta(&"rest_position")
 		var offset := Vector3.ZERO
@@ -254,9 +307,10 @@ func _physics_process(delta: float) -> void:
 		wall.position = wall.position.lerp(rest + offset, 1 - exp(-7 * delta))
 
 func capture() -> void:
-	end_drag()
+	end_drag(true)
 	end_plow()
 	for record in container.records():
-		if proxies.has(record.body):
+		if proxies.has(record.body) and ContainerPacking.inside(ContainerPacking.bounds(record,
+				proxies[record.body].transform), extent, containment_tolerance):
 			record.internal_pose = proxies[record.body].transform
 			record.packed = true

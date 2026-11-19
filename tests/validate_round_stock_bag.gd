@@ -114,23 +114,29 @@ func exercise_single(item: InteractableObject) -> void:
 	check(horizontal > 0.025, "Settled round stock responds to actual horizontal mouse dragging")
 	var floor_y := proxy.position.y
 	for i in 4:
-		mouse(MOUSE_BUTTON_WHEEL_UP, true, motion.position)
+		mouse(MOUSE_BUTTON_WHEEL_DOWN, true, motion.position)
 	await frames(65)
 	check(proxy.position.y > floor_y + 0.06, "Wheel input lifts round stock off the floor")
 	var raised := proxy.position.y
 	mouse(MOUSE_BUTTON_LEFT, false, motion.position)
+	check(bag.interior.drag_item == item, "LMB release preserves the persistent physical hold")
+	mouse(MOUSE_BUTTON_LEFT, true, Vector2(5, 5))
+	mouse(MOUSE_BUTTON_LEFT, false, Vector2(5, 5))
 	await frames(90)
 	check(proxy.position.y < raised - 0.04 and bag.interior.drag_item == null,
 		"Releasing the drag restores settling under gravity")
 	proxy.sleeping = true
 	await frames(2)
-	mouse(MOUSE_BUTTON_WHEEL_UP, true, motion.position)
+	mouse(MOUSE_BUTTON_WHEEL_DOWN, true, motion.position)
 	await frames(12)
 	check(proxy.position.y > floor_y + 0.01, "Selected stock can be awakened and lifted again after settling")
 	await frames(65)
-	check(bag.interior.drag_item == null and item.get_instance_id() == identity
+	check(bag.interior.drag_item == item and item.get_instance_id() == identity
 		and item.storage_owner == equipment.container and equipment.container.items().count(item) == 1,
-		"Wheel release preserves one unchanged owned object")
+		"Persistent wheel hold preserves one unchanged owned object")
+	mouse(MOUSE_BUTTON_LEFT, true, Vector2(5, 5))
+	mouse(MOUSE_BUTTON_LEFT, false, Vector2(5, 5))
+	await frames(75)
 	# A real excursion still invokes recovery; physical walls remain primary.
 	var safe: Transform3D = bag.interior.safe_poses[item]
 	proxy.position.x += 1.0
@@ -159,13 +165,12 @@ func exercise_group(order: Array[int], label: String) -> void:
 		var body: RigidBody3D = bag.interior.proxies[item]
 		var start := body.position
 		bag.select(item)
-		bag.interior.begin_drag(item)
+		check(bag.interior.begin_drag(item), "Each rummaged source acquires its own physical manipulation target")
 		bag.interior.drag_goal += Vector3(0.06, 0.10, 0.06)
 		await frames(90)
 		var moved := body.position.distance_to(start)
 		check(moved > 0.015, label + ": settled/contacted item remains physically responsive")
-		check(ContainerPacking.inside(ContainerPacking.bounds(InventoryItem.from_body(item), body.transform),
-			bag.interior.extent, bag.interior.containment_tolerance), "Mixed shapes remain inside collision containment")
+		check(bag.interior.contained(ContainerPacking.bounds(InventoryItem.from_body(item), body.transform), item), "Mixed shapes remain inside collision containment")
 		bag.interior.end_drag()
 		await frames(35)
 		print(label, " ", item.definition.display_name, " movement=", moved)
@@ -183,7 +188,7 @@ func exercise_group(order: Array[int], label: String) -> void:
 	check(tool.inventory_state() == tool_state, "Transfers and contact preserve Uni-Bolt grade and ammunition")
 	var body: RigidBody3D = bag.interior.proxies[tool]
 	var before := body.position
-	bag.interior.begin_drag(tool)
+	check(bag.interior.begin_drag(tool), "Reopened tool acquires its own physical manipulation target")
 	bag.interior.drag_goal += Vector3(0.03, 0.07, 0.02)
 	await frames(70)
 	check(body.position.distance_to(before) > 0.015, "Unequipped Uni-Bolt remains manipulable after reopening")

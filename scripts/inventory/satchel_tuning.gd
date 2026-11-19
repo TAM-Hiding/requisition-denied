@@ -10,7 +10,9 @@ extends Resource
 @export_group("Input")
 @export var plow_hold_seconds := 0.18
 @export var plow_motion_pixels := 6.0
-@export var height_step := 0.04
+@export var height_step := 0.08
+@export_group("Opening")
+@export var exit_clearance := 0.025
 @export_group("Inversion")
 @export var inversion_degrees := 155.0
 @export var inversion_dwell := 0.35

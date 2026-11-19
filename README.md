@@ -49,8 +49,10 @@ shared Equip, Unequip, Drop and Inspect transfers. Provisional limits are 50 L
 nominal, 60 L expanded, and 25 kg, with a maximum 68 × 42 × 28 cm physical
 packing envelope. Storage retains the same physical item for the running session.
 
-**Bag View** offers LMB physical dragging, wheel height, RMB-click item actions,
-RMB-hold-and-move plowing, and MMB orbit/turning. Deliberately turning the opening
+**Bag View** offers LMB physical dragging, wheel-down/up to raise/lower, RMB-click item actions,
+RMB-hold-and-move plowing, and MMB orbit/turning. LMB release retains the target
+height; click empty space to release. Lift fully through the opening and release
+to use the same safe world Drop. Deliberately turning the opening
 upside down triggers a collision-safe batch dump into the world. **Grid View**
 restores the rotating character preview. Arrangements persist between inspections.
 

@@ -3,6 +3,8 @@ extends SubViewportContainer
 signal item_selected(item: InteractableObject)
 signal context_requested(item: InteractableObject)
 signal dump_requested
+signal drag_drop_requested(item: InteractableObject)
+signal manipulation_changed(text: String)
 @export var tuning: SatchelTuning = preload("res://data/inventory/satchel_tuning.tres")
 var container: InventoryContainer
 var interior: ContainerInterior
@@ -25,8 +27,7 @@ var _press_hit := {}
 var _dragging := false
 var _drag_plane_y := 0.0
 var _drag_offset := Vector3.ZERO
-var _height_offset := 0.0
-var _wheel_release_delay := 0.0
+var _last_hint := ""
 var _tilt_poses := {}
 
 func open() -> String:
@@ -52,6 +53,7 @@ func open() -> String:
 		return "Container interior scene must provide ContainerInterior."
 	interior = scene
 	interior.container = container
+	interior.exit_clearance = tuning.exit_clearance
 	world.add_child(interior)
 	camera = Camera3D.new()
 	world.add_child(camera)
@@ -71,6 +73,7 @@ func open() -> String:
 	environment.environment.ambient_light_energy = 0.6
 	world.add_child(environment)
 	active = true
+	_last_hint = ""
 	dumping = false
 	interior.selected = selected if container.contains(selected) else null
 	interior.highlight()
@@ -105,7 +108,7 @@ func update_camera() -> void:
 
 func _draw() -> void:
 	if active and cursor.x >= 0:
-		var color := Color("#dcb66a") if interior.plowing else Color("#75cab9")
+		var color := Color("#dcb66a") if interior.plowing or interior.can_extract(interior.drag_item) else Color("#75cab9")
 		draw_arc(cursor, 7.0, 0, TAU, 24, color, 1.5, true)
 
 func cancel_gestures() -> void:
@@ -119,9 +122,21 @@ func end_plow() -> void:
 
 func end_drag() -> void:
 	_dragging = false
-	_wheel_release_delay = 0
 	if is_instance_valid(interior):
 		interior.end_drag()
+
+func finish_pointer_drag() -> void:
+	var was_dragging := _dragging
+	_dragging = false
+	if was_dragging and is_instance_valid(interior) and interior.can_extract(interior.drag_item):
+		drag_drop_requested.emit(interior.drag_item)
+
+func release_held() -> void:
+	_dragging = false
+	if is_instance_valid(interior) and interior.can_extract(interior.drag_item):
+		drag_drop_requested.emit(interior.drag_item)
+	else:
+		end_drag()
 
 func release_right(open_context := true) -> void:
 	if _rmb_pending and not _rmb_consumed and open_context and not _press_hit.is_empty():
@@ -142,15 +157,13 @@ func select(item: InteractableObject) -> void:
 func advance_gestures(delta: float) -> void:
 	if not active or dumping:
 		return
-	if _wheel_release_delay > 0 and not _dragging:
-		_wheel_release_delay -= delta
-		if _wheel_release_delay <= 0:
-			interior.end_drag()
 	if _rmb_pending and not _rmb_consumed:
 		_rmb_elapsed += delta
 		if _rmb_elapsed >= tuning.plow_hold_seconds and cursor.distance_to(_press_point) >= tuning.plow_motion_pixels 				and not _press_hit.is_empty():
 			_rmb_consumed = true
 			end_drag()
+			if interior.returning:
+				return
 			interior.begin_plow(_press_hit.position + _press_hit.normal * 0.028)
 			update_pointer_target()
 	if orbiting:
@@ -170,6 +183,18 @@ func advance_gestures(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	advance_gestures(delta)
+	if active:
+		var held := interior.drag_item
+		var hint := "SELECT AN ITEM • CLICK EMPTY SPACE TO RELEASE"
+		if interior.returning:
+			hint = "RETURNING THROUGH OPENING • RESELECT TO RESUME HOLDING"
+		elif is_instance_valid(held):
+			hint = "READY TO DROP • RELEASE LMB OR CLICK EMPTY SPACE" if interior.can_extract(held) \
+				else "HELD AT TARGET • WHEEL DOWN RAISES / UP LOWERS • CLICK EMPTY TO RELEASE"
+		if hint != _last_hint:
+			_last_hint = hint
+			manipulation_changed.emit(hint)
+		queue_redraw()
 
 func opening_direction() -> Vector3:
 	return Basis(Vector3.RIGHT, -bag_angle) * Vector3.UP
@@ -178,6 +203,14 @@ func update_bag_orientation() -> void:
 	if bag_angle <= 0.0001:
 		restore_bag()
 		return
+	if is_instance_valid(interior.drag_item):
+		var held := interior.drag_item
+		var box := ContainerPacking.bounds(InventoryItem.from_body(held), interior.proxies[held].transform)
+		if box.end.y > interior.extent.y:
+			interior.end_drag()
+			bag_angle = 0
+			view_tilt = 0.65
+			return
 	if _tilt_poses.is_empty():
 		cancel_gestures_for_tilt()
 		interior.capture()
@@ -216,7 +249,7 @@ func update_pointer_target() -> void:
 	if _dragging:
 		var point: Variant = Plane(Vector3.UP, _drag_plane_y).intersects_ray(origin, direction)
 		if point != null:
-			interior.drag_goal = point + _drag_offset + Vector3.UP * _height_offset
+			interior.drag_goal = point + _drag_offset
 	elif interior.plowing:
 		var point: Variant = Plane(Vector3.UP, interior.plow_plane_y).intersects_ray(origin, direction)
 		if point != null:
@@ -232,21 +265,21 @@ func _gui_input(event: InputEvent) -> void:
 			orbiting = event.pressed
 			accept_event()
 		elif event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN] and event.pressed:
-			var step := tuning.height_step * (1 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -1)
-			if _dragging:
-				_height_offset += step
-				update_pointer_target()
-			elif container.contains(selected):
-				if interior.drag_item != selected:
-					interior.begin_drag(selected)
-				interior.drag_goal.y += step
-				_wheel_release_delay = 0.4
+			var step := tuning.height_step * (1 if event.button_index == MOUSE_BUTTON_WHEEL_DOWN else -1)
+			if container.contains(selected) and bag_angle <= 0.001:
+				if not interior.begin_drag(selected):
+					return
+				if _dragging:
+					_drag_offset.y += step
+					update_pointer_target()
+				else:
+					interior.drag_goal.y += step
 			accept_event()
 		elif bag_angle > 0.001:
 			return
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			if event.pressed:
-				end_drag()
+				_dragging = false
 				_rmb_pending = true
 				_rmb_consumed = false
 				_rmb_elapsed = 0
@@ -260,14 +293,15 @@ func _gui_input(event: InputEvent) -> void:
 				var hit := interior.pick(camera, cursor)
 				if not hit.is_empty():
 					select(hit.item)
-					interior.begin_drag(selected)
+					if not interior.begin_drag(selected):
+						return
 					_dragging = true
-					_wheel_release_delay = 0
-					_height_offset = 0
 					_drag_plane_y = hit.position.y
-					_drag_offset = interior.proxies[selected].position - hit.position
+					_drag_offset = interior.drag_goal - hit.position
+				else:
+					release_held()
 			else:
-				end_drag()
+				finish_pointer_drag()
 			accept_event()
 	elif event is InputEventMouseMotion:
 		cursor = event.position

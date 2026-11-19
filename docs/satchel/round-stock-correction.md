@@ -1,5 +1,7 @@
 # Round-stock manipulation correction
 
+This records the earlier containment correction. The subsequent [floor-contact and physical-controls revision](physical-bag-controls.md) adds compound contact retention, persistent holding and opening extraction. Its input instructions and final test totals supersede the historical figures below.
+
 The round-stock playtest exposed a shared containment defect. It did not require changing stock friction, equipment transfers, sleeping policy, controls, bag dimensions or inversion behavior.
 
 ## Controlled reproduction
