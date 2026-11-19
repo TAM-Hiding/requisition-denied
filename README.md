@@ -44,10 +44,20 @@ create duplicate entries. Restarting the session clears knowledge.
 
 ## Personal inventory
 
-Choose **E → Store** on an eligible world object, then open **T**. Right-click
-entries to equip, unequip or retrieve them into clear space. The grid grows with
-contents. Provisional limits are 30 L, 25 kg, and a 60 × 40 × 25 cm insertion
-envelope. Storage retains the physical item for the running session.
+Choose **E → Store** on eligible world objects, then open **T**. Both views use
+shared Equip, Unequip, Drop and Inspect transfers. Provisional limits are 50 L
+nominal, 60 L expanded, and 25 kg, with a maximum 68 × 42 × 28 cm physical
+packing envelope. Storage retains the same physical item for the running session.
+
+**Bag View** offers LMB physical dragging, wheel-down/up to raise/lower, RMB-click item actions,
+RMB-hold-and-move plowing, and MMB orbit/turning. LMB release retains the target
+height; click empty space to release. Lift fully through the opening and release
+to use the same safe world Drop. Deliberately turning the opening
+upside down triggers a collision-safe batch dump into the world. **Grid View**
+restores the rotating character preview. Arrangements persist between inspections.
+
+The [physical satchel documentation](docs/satchel/README.md) covers packing,
+containment and the isolated simulation.
 
 The [inventory documentation](docs/inventory/README.md) describes ownership,
 capacity, serialization, and the future physical-container interface.
@@ -170,8 +180,8 @@ to the nearest 5%.
 
 ## Uni-Bolt™ fastening and structural tests
 
-The installation tool is on the floor ahead and left of Otis's spawn. Stock
-plates, angles, a bar and a gusset are grouped along the southwest side. The
+The installation tool is on the floor ahead and left of Otis's spawn. Use the southwest scrap dispenser for plates, angles, bars and gussets; obsolete
+authored test stock has been removed. The
 orange-faced structural test ram is west of the storage crate. Approach the
 yellow-trimmed hydraulic pillar beside it and press **E** for **Force −**,
 **Force +**, **Extend**, **Retract**, **Stop**, and **Reset**. The slider jumps

@@ -4,6 +4,9 @@ extends Node
 signal feedback(message: String)
 signal changed
 var container: InventoryContainer
+var world_drops := WorldDropPlacement.new()
+var dumping := false
+@export var dump_stagger_frames := 3
 ## Supported active sockets are explicit. Future categories register here.
 var slot_interfaces: Dictionary = {&"tool": &"handheld"}
 var _held: InteractableObject
@@ -38,6 +41,8 @@ func result(ok: bool, message: String) -> Dictionary:
 	return {"ok": ok, "message": message}
 
 func pick_up(item: InteractableObject) -> Dictionary:
+	if dumping:
+		return result(false, "Finish emptying the satchel first.")
 	if not is_instance_valid(item) or item.fastened or item.mobility() != ObjectDefinition.Mobility.CARRYABLE or item.state != InteractableObject.State.WORLD or item.storage_owner != null or item.equipment_owner != null:
 		return result(false, "That object cannot be picked up.")
 	if _held != null or not item.compatible_equipment_slots().has(&"tool") or not slot_interfaces.has(&"tool"):
@@ -70,12 +75,16 @@ func equipped_mass_kg() -> float:
 	return _held.mass if is_instance_valid(_held) else 0.0
 
 func store_world(item: InteractableObject) -> Dictionary:
+	if dumping:
+		return result(false, "Finish emptying the satchel first.")
 	if actor.placement.is_active():
 		return result(false, "Place or cancel the manipulated object first.")
 	var issue := container.insert(item)
 	return result(issue.is_empty(), "Stored %s." % item.definition.display_name if issue.is_empty() else issue)
 
 func stow() -> Dictionary:
+	if dumping:
+		return result(false, "Finish emptying the satchel first.")
 	if placing:
 		return result(false, "Finish or cancel placement first.")
 	if _held == null:
@@ -102,6 +111,8 @@ func equipment_slot(item: InteractableObject) -> StringName:
 	return &""
 
 func equip_item(item: InteractableObject) -> Dictionary:
+	if dumping:
+		return result(false, "Finish emptying the satchel first.")
 	if not actor.get_tree().current_scene is Node3D:
 		return result(false, "World placement unavailable.")
 	if placing or not container.accessible or not container.contains(item) or item.storage_owner != container \
@@ -144,18 +155,50 @@ func equip_first() -> Dictionary:
 	return equip_item(item) if item != null else result(false, "No stored equipment.")
 
 func retrieve(item: InteractableObject) -> Dictionary:
+	if dumping:
+		return result(false, "Finish emptying the satchel first.")
+	return retrieve_scattered(item)
+
+func retrieve_scattered(item: InteractableObject, release_index := 0) -> Dictionary:
 	if not actor.get_tree().current_scene is Node3D:
 		return result(false, "World placement unavailable.")
 	if not container.accessible or not container.contains(item) or item.storage_owner != container \
 			or item.state != InteractableObject.State.STOWED or item.equipment_owner != null:
 		return result(false, "Stored item unavailable.")
-	var candidate: Variant = drop_pose(item)
+	var candidate: Variant = world_drops.find_pose(actor, item, release_index)
 	if candidate == null:
 		return result(false, "No clear space to retrieve. Step back or look elsewhere.")
 	container.commit_remove(item)
-	restore_world(item, candidate, false)
+	restore_world(item, candidate, true)
+	world_drops.remember(item, candidate)
 	container.changed.emit()
 	return result(true, "Retrieved %s." % item.definition.display_name)
+
+func dump_container() -> Dictionary:
+	if dumping:
+		return {"ok": false, "released": 0, "retained": container.items().size(), "message": "The satchel is already emptying."}
+	if not container.accessible or not actor.get_tree().current_scene is Node3D:
+		return {"ok": false, "released": 0, "retained": container.items().size(), "message": "Container or world placement unavailable."}
+	dumping = true
+	var pending := container.items()
+	var released := 0
+	for item in pending:
+		if not is_instance_valid(item) or not container.contains(item):
+			continue
+		var transfer := retrieve_scattered(item, released)
+		if transfer.ok:
+			released += 1
+		# Give Godot time to synchronize and settle the preceding release.
+		# Each later item queries the current world and the resulting pile.
+		for frame in maxi(1, dump_stagger_frames):
+			await get_tree().physics_frame
+	dumping = false
+	var retained := container.items().size()
+	var message := "Dropped %d item(s)." % released
+	if retained > 0:
+		message += " %d retained because no safe release was available." % retained
+	feedback.emit(message)
+	return {"ok": retained == 0, "released": released, "retained": retained, "message": message}
 
 func drop_pose(item: InteractableObject) -> Variant:
 	var clearance := PlacementClearance.new()
@@ -185,6 +228,8 @@ func drop_pose(item: InteractableObject) -> Variant:
 	return null
 
 func drop() -> Dictionary:
+	if dumping:
+		return result(false, "Finish emptying the satchel first.")
 	if not actor.get_tree().current_scene is Node3D:
 		return result(false, "World placement unavailable.")
 	if placing:

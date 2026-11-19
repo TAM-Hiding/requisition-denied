@@ -5,6 +5,11 @@ var actor: OtisController
 var active := false
 var panel: PanelContainer
 var preview: InventoryPreview
+var bag: BagView
+var bag_panel: VBoxContainer
+var view_toggle: Button
+var _preview_column: VBoxContainer
+var _dump_sequence := false
 var grid: GridContainer
 var grid_scroll: ScrollContainer
 var collapse: Button
@@ -64,9 +69,13 @@ func _ready() -> void:
 	left.add_child(load_label)
 	details = label("Select an item to inspect its storage record.", 14)
 	details.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	details.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	left.add_child(details)
+	details.custom_minimum_size.x = 230
+	var detail_scroll := ScrollContainer.new()
+	detail_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	detail_scroll.add_child(details)
+	left.add_child(detail_scroll)
 	var centre := VBoxContainer.new()
+	_preview_column = centre
 	centre.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	centre.size_flags_stretch_ratio = 1.1
 	columns.add_child(centre)
@@ -84,6 +93,26 @@ func _ready() -> void:
 		grid_scroll.visible = not grid_scroll.visible
 		collapse.text = "CONTENTS   ▾" if grid_scroll.visible else "CONTENTS   ▸")
 	right.add_child(collapse)
+	view_toggle = Button.new()
+	view_toggle.text = "BAG VIEW"
+	view_toggle.pressed.connect(toggle_view)
+	right.add_child(view_toggle)
+	bag_panel = VBoxContainer.new()
+	bag_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right.add_child(bag_panel)
+	bag = BagView.new()
+	bag.container = actor.equipment.container
+	bag.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	bag.item_selected.connect(select_item)
+	bag.context_requested.connect(bag_context)
+	bag.dump_requested.connect(dump_bag)
+	bag.drag_drop_requested.connect(drop_from_opening)
+	bag_panel.add_child(bag)
+	var hold_hint := label("SELECT AN ITEM • CLICK EMPTY SPACE TO RELEASE", 12)
+	bag.manipulation_changed.connect(func(text: String) -> void: hold_hint.text = text)
+	bag_panel.add_child(hold_hint)
+	bag_panel.add_child(label("LMB DRAG • WHEEL DOWN RAISES / UP LOWERS\nRMB CLICK ACTIONS / HOLD PLOW • MMB TURN BAG", 12))
+	bag_panel.hide()
 	grid_scroll = ScrollContainer.new()
 	grid_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	right.add_child(grid_scroll)
@@ -125,7 +154,7 @@ static func label(text: String, size: int) -> Label:
 	return result
 
 func show_inventory(hud: Control) -> bool:
-	if active or not actor.controls_enabled:
+	if active or not actor.controls_enabled or actor.equipment.dumping or _dump_sequence:
 		return false
 	_hud = hud
 	opening.emit()
@@ -142,9 +171,17 @@ func show_inventory(hud: Control) -> bool:
 	refresh()
 	return true
 
-func hide_inventory() -> void:
+func hide_inventory(force := false) -> void:
+	if _dump_sequence and not force:
+		return
 	if not active:
 		return
+	bag.close()
+	bag_panel.hide()
+	_preview_column.show()
+	grid_scroll.show()
+	collapse.show()
+	view_toggle.text = "BAG VIEW"
 	active = false
 	turn_left = false
 	turn_right = false
@@ -159,6 +196,17 @@ func hide_inventory() -> void:
 func route(event: InputEvent) -> void:
 	if not active:
 		return
+	if _dump_sequence:
+		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
+		if not bag.get_global_rect().has_point(event.position):
+			bag.release_right(false)
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		if not bag.get_global_rect().has_point(event.position):
+			bag.finish_pointer_drag()
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and not event.pressed:
+		bag.orbiting = false
 	if event.is_action_pressed("inventory_toggle") or event.is_action_pressed("ui_cancel"):
 		if not event.is_echo():
 			hide_inventory()
@@ -176,13 +224,57 @@ func _process(delta: float) -> void:
 	if active:
 		preview.pivot.rotation.y += (float(turn_right) - float(turn_left)) * delta * 1.6
 
+func toggle_view() -> void:
+	if _dump_sequence:
+		return
+	if bag.active:
+		bag.close()
+		bag_panel.hide()
+		_preview_column.show()
+		grid_scroll.show()
+		collapse.show()
+		view_toggle.text = "BAG VIEW"
+	else:
+		bag.selected = selected if actor.equipment.container.contains(selected) else null
+		var issue := bag.open()
+		if not issue.is_empty():
+			feedback.text = issue
+			return
+		bag_panel.show()
+		_preview_column.hide()
+		grid_scroll.hide()
+		collapse.hide()
+		view_toggle.text = "GRID VIEW"
+
+func select_item(item: InteractableObject) -> void:
+	selected = item
+	bag.selected = item
+	var record := InventoryItem.from_body(item)
+	var size := record.dimensions()
+	details.text = "%s\n%s\n\n%s\n%.2f kg · %.2f L\n%.0f × %.0f × %.0f mm" % [
+		item.definition.display_name, item.definition.object_id, item.definition.condition,
+		item.mass, record.volume_m3() * 1000, size.x * 1000, size.y * 1000, size.z * 1000]
+	if item is FasteningTool:
+		details.text += "\n\n%s\nMAGAZINE %d / %d\nRESERVE %d\n%s MODE" % [
+			item.GRADES[item.grade_index].title, item.rounds.size(), item.CAPACITY, item.recovered.size(),
+			"REMOVE" if item.removing else "INSTALL"]
+	else:
+		for key in item.definition.properties.keys().slice(0, 5):
+			if key != "inventory_icon":
+				details.text += "\n%s  %s" % [key, str(item.definition.properties[key]).left(100)]
+
 func refresh() -> void:
+	var reopen := bag.active
+	if reopen:
+		bag.close()
 	var equipment := actor.equipment
 	var container := equipment.container
 	var mass := actor.carrying_loads()
 	load_label.text = "CARRIED  %.2f kg\nLIFT REFERENCE  %.2f kg\n\nINVENTORY  %.2f kg\nEQUIPPED  %.2f kg\nEXTERNAL HOLD  %.2f kg\n\nVOLUME  %.1f / %.1f L\nCONTAINER RATING  %.1f kg" % [
 		mass.total, actor.placement.lift_capacity(), mass.inventory, mass.equipped, mass.external,
-		container.volume_m3() * 1000, container.definition.capacity_m3 * 1000, container.definition.maximum_mass_kg]
+		container.volume_m3() * 1000, container.definition.effective_capacity_m3() * 1000, container.definition.maximum_mass_kg]
+	load_label.text += "\nNOMINAL  %.0f L%s" % [container.definition.capacity_m3 * 1000,
+		" · EXPANDED" if container.volume_m3() > container.definition.capacity_m3 else ""]
 	var held := equipment.held_item()
 	slot_button.text = "TOOL SLOT\n" + (held.definition.display_name if held != null else "Empty")
 	for child in grid.get_children():
@@ -201,16 +293,16 @@ func refresh() -> void:
 		button.gui_input.connect(entry_input.bind(item))
 		grid.add_child(button)
 	preview.refresh(actor)
+	if reopen:
+		bag.selected = selected if actor.equipment.container.contains(selected) else null
+		var issue := bag.open()
+		if not issue.is_empty():
+			feedback.text = issue
 
 func entry_input(event: InputEvent, item: InteractableObject) -> void:
 	if not event is InputEventMouseButton or not event.pressed or not is_instance_valid(item):
 		return
-	selected = item
-	var record := InventoryItem.from_body(item)
-	var size := record.dimensions()
-	details.text = "%s\n%s\n\n%s\n%.2f kg · %.2f L\n%.0f × %.0f × %.0f mm" % [
-		item.definition.display_name, item.definition.object_id, item.definition.condition,
-		item.mass, record.volume_m3() * 1000, size.x * 1000, size.y * 1000, size.z * 1000]
+	select_item(item)
 	if event.button_index != MOUSE_BUTTON_RIGHT:
 		return
 	popup.clear()
@@ -225,8 +317,17 @@ func entry_input(event: InputEvent, item: InteractableObject) -> void:
 	popup.popup()
 
 func perform_action(id: int) -> void:
-	if not is_instance_valid(selected):
+	if not is_instance_valid(selected) or _dump_sequence:
 		return
+	if id == 3:
+		select_item(selected)
+		feedback.text = "Inspection displayed."
+		return
+	if id == 4:
+		return
+	var reopen := bag.active
+	if reopen:
+		bag.close()
 	var equipment := actor.equipment
 	var result := {"ok": false, "message": "Item unavailable."}
 	if id == 0:
@@ -239,3 +340,44 @@ func perform_action(id: int) -> void:
 	# A newly equipped item remains hidden behind the interface.
 	equipment.presentation.set_station_active(true)
 	refresh()
+	if reopen:
+		bag.selected = selected if equipment.container.contains(selected) else null
+		var issue := bag.open()
+		if not issue.is_empty():
+			feedback.text = issue
+
+
+func bag_context(item: InteractableObject) -> void:
+	if not actor.equipment.container.contains(item):
+		return
+	select_item(item)
+	popup.clear()
+	if actor.equipment.equipment_slot(item) != &"":
+		popup.add_item("Equip", 0)
+	popup.add_item("Drop", 2)
+	popup.add_item("Inspect", 3)
+	popup.add_item("Cancel", 4)
+	popup.position = Vector2i(get_viewport().get_mouse_position())
+	popup.popup()
+
+func drop_from_opening(item: InteractableObject) -> void:
+	if not bag.active or not bag.interior.can_extract(item):
+		return
+	select_item(item)
+	# Same collision-safe, transactional transfer as context-menu Drop.
+	perform_action(2)
+
+func dump_bag() -> void:
+	if _dump_sequence:
+		return
+	_dump_sequence = true
+	feedback.text = "Emptying satchel…"
+	if is_instance_valid(bag.interior):
+		var tween := create_tween().set_parallel()
+		for body: RigidBody3D in bag.interior.proxies.values():
+			tween.tween_property(body, "position", body.position + Vector3.UP * 0.04, 0.22)
+		await tween.finished
+	hide_inventory(true)
+	var result: Dictionary = await actor.equipment.dump_container()
+	_dump_sequence = false
+	get_parent().call("show_feedback", result.message)

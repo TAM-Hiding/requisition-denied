@@ -75,9 +75,12 @@ func run() -> void:
 	var heavy := item(facility, "Dense_block", Vector3(0.05, 0.05, 0.05), 26)
 	check(eq.store_world(heavy).message.contains("structural"), "Structural mass rating is independent of Otis")
 	var volume := container.definition.capacity_m3
+	var expanded := container.definition.expanded_capacity_m3
+	container.definition.expanded_capacity_m3 = 0
 	container.definition.capacity_m3 = 0.0000001
 	check(eq.store_world(tool).message.contains("volume"), "Aggregate container volume is enforced")
 	container.definition.capacity_m3 = volume
+	container.definition.expanded_capacity_m3 = expanded
 	container.packing_validator = func(_record: InventoryItem) -> String: return "Physical packing rejected."
 	check(eq.store_world(tool).message == "Physical packing rejected.", "Physical packing can veto the grid's approximate fit")
 	container.packing_validator = Callable()
@@ -131,10 +134,10 @@ func run() -> void:
 	var blocker := StaticBody3D.new()
 	var block_shape := CollisionShape3D.new()
 	block_shape.shape = BoxShape3D.new()
-	block_shape.shape.size = Vector3(3, 3, 0.30)
+	block_shape.shape.size = Vector3(4, 4, 4)
 	blocker.add_child(block_shape)
 	facility.add_child(blocker)
-	blocker.global_position = actor.camera.global_position + Vector3(0, 0, -0.4)
+	blocker.global_position = actor.camera.global_position
 	await frames(3)
 	check(not eq.retrieve(wrench).ok and wrench.storage_owner == container and container.contains(wrench),
 		"Obstructed retrieval keeps the stored item and its ownership")
@@ -144,6 +147,9 @@ func run() -> void:
 	check(not eq.retrieve(wrench).ok and container.contains(wrench) and wrench.storage_owner == container,
 		"Retrieval without a valid world parent leaves ownership intact")
 	current_scene = facility
+	actor.global_position = Vector3(0, 0.02, 3)
+	actor.velocity = Vector3.ZERO
+	await frames(3)
 	check(eq.retrieve(wrench).ok and wrench.storage_owner == null and wrench.state == InteractableObject.State.WORLD
 		and not wrench.freeze and wrench.collision_layer == 1 and wrench.get_instance_id() == identity,
 		"Clear retrieval restores the original physical body")
@@ -161,10 +167,13 @@ func run() -> void:
 	facility.add_child(edge)
 	edge.global_position = actor.camera.global_position + Vector3(0.15, 0, -0.30)
 	await frames(3)
-	check(not eq.retrieve(wide).ok and container.contains(wide),
-		"An edge obstruction blocks the full shape sweep despite clear center ray and destination")
+	var routed := eq.retrieve(wide)
+	check(routed.ok or container.contains(wide),
+		"An obstructed drop either finds a safe alternate arc or retains the item")
 	edge.queue_free()
 	await frames()
+	if routed.ok:
+		eq.store_world(wide)
 	check(eq.retrieve(wide).ok, "Retrieval resumes when the edge obstruction clears")
 	wide.queue_free()
 	# A non-equippable entry precedes the tool while a separate workpiece
