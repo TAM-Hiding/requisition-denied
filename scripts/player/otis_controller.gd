@@ -16,6 +16,7 @@ var tool_aiming := false
 @export var gravity: float = 9.8
 @export var interact_hold_threshold: float = 0.35
 var equipment: EquipmentController
+var locomotion: OtisLocomotion
 var knowledge := PlayerKnowledge.new()
 var controls_enabled: bool = true
 @onready var placement: PrecisionPlacement = $PrecisionPlacement
@@ -26,6 +27,9 @@ func _ready() -> void:
 	equipment = EquipmentController.new()
 	equipment.name = "Equipment"
 	add_child(equipment)
+	locomotion = OtisLocomotion.new()
+	locomotion.name = "Locomotion"
+	add_child(locomotion)
 
 func supporting_load_kg() -> float:
 	return body_mass_kg + carrying_loads().total
@@ -39,13 +43,14 @@ func carrying_loads() -> Dictionary:
 		"dragged": 0.0, "total": stored + equipped + external}
 
 func _unhandled_input(event: InputEvent) -> void:
+	locomotion.handle_input(event)
 	if event is InputEventMouseMotion and controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if placement.is_active() and placement.rotating:
 			placement.rotate_from_mouse(event.relative)
 			get_viewport().set_input_as_handled()
 			return
 		var sensitivity := mouse_sensitivity * (tool_aim_sensitivity if tool_aiming else 1.0)
-		rotate_y(-event.relative.x * sensitivity)
+		locomotion.try_turn(-event.relative.x * sensitivity)
 		camera.rotation.x = clampf(camera.rotation.x - event.relative.y * sensitivity, -1.5, 1.5)
 
 func equipped_tool() -> FasteningTool:
@@ -65,23 +70,7 @@ func _physics_process(delta: float) -> void:
 	if tool_aiming and (equipped_tool() == null or not controls_enabled or placement.input_suspended):
 		set_tool_aiming(false)
 	camera.fov = move_toward(camera.fov, tool_aim_fov if tool_aiming else camera_fov, delta * 100.0)
-	var speed := movement_speed * (1.0 - 0.25 * placement.load_fraction())
-	var movement_acceleration := acceleration * (1.0 - 0.30 * placement.load_fraction())
-	var direction := Vector3.ZERO
-	if controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		var axis := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
-		direction = global_basis * Vector3(axis.x, 0, axis.y)
-	if not controls_enabled or Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
-		velocity.x = 0
-		velocity.z = 0
-	else:
-		velocity.x = move_toward(velocity.x, direction.x * speed, movement_acceleration * delta)
-		velocity.z = move_toward(velocity.z, direction.z * speed, movement_acceleration * delta)
-	if not is_on_floor():
-		velocity.y -= gravity * delta
-	else:
-		velocity.y = 0
-	move_and_slide()
+	locomotion.tick(delta)
 
 func target_hit() -> Dictionary:
 	var query := PhysicsRayQueryParameters3D.create(camera.global_position,

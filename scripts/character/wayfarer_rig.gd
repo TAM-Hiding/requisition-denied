@@ -111,8 +111,10 @@ func set_inspection(view: int) -> void:
 			actor.camera.make_current()
 
 func update_camera() -> void:
-	var focus := actor.to_global(Vector3(0, 0.96, 0))
-	var desired := actor.to_global(Vector3(1.35, 1.47, -3.05 if inspection_side == 1 else 3.05))
+	var low := actor.locomotion.posture == OtisLocomotion.Posture.PRONE if actor.locomotion != null else false
+	var crouched := actor.locomotion.posture == OtisLocomotion.Posture.CROUCHING if actor.locomotion != null else false
+	var focus := actor.to_global(Vector3(0, 0.35 if low else (0.65 if crouched else 0.96), 0))
+	var desired := actor.to_global(Vector3(1.35, 0.9 if low else (1.2 if crouched else 1.47), -3.05 if inspection_side == 1 else 3.05))
 	var query := PhysicsRayQueryParameters3D.create(focus, desired, 17, [actor.get_rid()])
 	var hit := actor.get_world_3d().direct_space_state.intersect_ray(query)
 	if not hit.is_empty():
@@ -141,16 +143,27 @@ static func resting_wrist(side: float) -> Basis:
 func animate(delta: float, holding: bool, manipulating: bool) -> void:
 	time_alive += delta
 	var movement := Vector2(actor.velocity.x, actor.velocity.z).length()
+	var local_velocity := actor.global_basis.inverse() * Vector3(actor.velocity.x, 0, actor.velocity.z)
+	var forward := clampf(-local_velocity.z / maxf(movement, 0.01), -1, 1)
+	var lateral := clampf(local_velocity.x / maxf(movement, 0.01), -1, 1)
+	var crouched := actor.locomotion != null and actor.locomotion.posture == OtisLocomotion.Posture.CROUCHING
+	var prone := actor.locomotion != null and actor.locomotion.posture == OtisLocomotion.Posture.PRONE
+	var climbing := actor.locomotion != null and actor.locomotion.climbing
 	var stride := clampf(movement / maxf(actor.movement_speed, 0.01), 0.0, 1.0)
 	gait_phase = fposmod(gait_phase + movement * delta * 2.8, TAU)
 	var yaw_delta := angle_difference(previous_yaw, actor.rotation.y)
 	previous_yaw = actor.rotation.y
 	var blend := 1.0 - exp(-12.0 * delta)
 	var turning := clampf(yaw_delta / maxf(delta, 0.001), -2.0, 2.0)
-	core.position.y = lerpf(core.position.y, 0.94 + 0.013 * absf(sin(gait_phase)) * stride, blend)
+	# Articulate the same joints/geometry. The original standing-forward
+	# amplitudes and phase rate remain the reference gait.
+	position = position.lerp(Vector3(0, 0.25, 0.85) if prone else Vector3.ZERO, blend)
+	rotation.x = lerp_angle(rotation.x, -PI / 2 if prone else 0.0, blend)
+	core.position.y = lerpf(core.position.y, (0.465 if crouched else 0.94) + 0.013 * absf(sin(gait_phase)) * stride, blend)
+	core.rotation.x = lerpf(core.rotation.x, 0.12 if crouched else 0.0, blend)
 	core.rotation.z = lerpf(core.rotation.z, turning * 0.026, blend)
 	var gaze := clampf(actor.camera.rotation.x, -0.32, 0.38)
-	head.rotation.x = lerpf(head.rotation.x, gaze + sin(time_alive * 1.8) * 0.018, blend)
+	head.rotation.x = lerpf(head.rotation.x, gaze + (PI / 2 if prone else 0.0) + sin(time_alive * 1.8) * 0.018, blend)
 	head.rotation.y = lerpf(head.rotation.y, turning * 0.12, blend)
 	for limb in limbs:
 		var wave := sin(gait_phase) * float(limb.side)
@@ -160,18 +173,38 @@ func animate(delta: float, holding: bool, manipulating: bool) -> void:
 		var shoulder: Node3D = limb.shoulder
 		var forearm: Node3D = limb.forearm
 		var hand: Node3D = limb.hand
-		thigh.rotation.x = lerpf(thigh.rotation.x, wave * stride * 0.31, blend)
+		var leg_swing := wave * forward
+		var hip_goal := leg_swing * stride * 0.31
+		var knee_goal := -maxf(0.0, leg_swing) * stride * 0.43
+		if crouched:
+			hip_goal += 1.15
+			knee_goal -= 2.3
+		elif prone:
+			hip_goal = wave * stride * 0.15
+			knee_goal = -0.12 - maxf(0.0, wave) * stride * 0.28
+		elif climbing:
+			hip_goal = 0.45
+			knee_goal = -0.8
+		thigh.rotation.x = lerpf(thigh.rotation.x, hip_goal, blend)
+		thigh.rotation.z = lerpf(thigh.rotation.z, -wave * stride * lateral * 0.24, blend)
 		thigh.rotation.y = lerpf(thigh.rotation.y, turning * 0.06 * limb.side, blend)
-		shin.rotation.x = lerpf(shin.rotation.x, -maxf(0.0, wave) * stride * 0.43, blend)
+		shin.rotation.x = lerpf(shin.rotation.x, knee_goal, blend)
 		foot.rotation.x = lerpf(foot.rotation.x, -0.75 * (thigh.rotation.x + shin.rotation.x), blend)
 		var tool_hand: bool = limb.side > 0 and holding
 		var reaching: bool = tool_hand or manipulating
 		var reach := 0.3 if manipulating else (0.59 if actor.tool_aiming else 0.38)
-		shoulder.rotation.x = lerpf(shoulder.rotation.x, reach if reaching else -wave * stride * 0.21, blend)
+		var arm_goal := reach if reaching else -leg_swing * stride * 0.21
+		if prone and not tool_hand:
+			arm_goal = 2.8 + wave * stride * 0.18
+		elif climbing and not tool_hand:
+			arm_goal = 1.9
+		shoulder.rotation.x = lerpf(shoulder.rotation.x, arm_goal, blend)
 		shoulder.rotation.z = lerpf(shoulder.rotation.z, limb.side * (0.09 if reaching else 0.04), blend)
 		forearm.rotation.x = lerpf(forearm.rotation.x, (1.10 if actor.tool_aiming else 0.83) if tool_hand
 			else (0.64 if manipulating else 0.10), blend)
-		var wrist_goal := resting_wrist(limb.side)
+		if prone and not tool_hand:
+			forearm.rotation.x = lerpf(forearm.rotation.x, 0.65 - wave * stride * 0.12, blend)
+		var wrist_goal := Basis.IDENTITY if prone else resting_wrist(limb.side)
 		if reaching:
 			wrist_goal = Basis(Vector3.RIGHT, clampf(gaze - shoulder.rotation.x - forearm.rotation.x, -0.70, 0.70)) if tool_hand else Basis.IDENTITY
 		hand.quaternion = hand.quaternion.slerp(wrist_goal.get_rotation_quaternion(), blend)
