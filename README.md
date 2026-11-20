@@ -2,11 +2,10 @@
 
 Linux-first, low-poly immersive systems game built with **Godot 4.7.2 / GDScript**.
 
-RD-002 extends the foundation with a physical crate and a carryable wrench.
-One active equipment slot and a separate one-item storage container support
-pickup, stow, retrieve and safe drop. Held items retract around geometry, and
-crate manipulation remains available with equipment held. Manipulation requests
-a smooth lowered pose; release restores the normal pose. No full inventory UI is introduced.
+RD-013 adds hold-to-sprint, jumping, crouching, belly crawling and validated
+ledge climbing. Carried mass modifies jump height and sprint speed while the
+existing physical props, Uni-Bolt, machinery and satchel remain available.
+See [movement tuning and validation](docs/locomotion/README.md).
 
 RD-001 supplies a playable 12 × 12 × 4 m facility chamber, Otis's first-person
 controller, contextual inspection, and actor-owned session knowledge. No AI or
@@ -24,6 +23,9 @@ godot --path .
 | Input | Action |
 | --- | --- |
 | WASD | Walk |
+| Hold Shift + W | Sprint while standing and free of incompatible interactions |
+| Space | Jump; attempt a reachable ledge climb, including while airborne |
+| Alt tap / hold | Toggle crouch / enter belly crawl after 0.4 s; tap from crawl returns to crouch |
 | Mouse | Look |
 | Middle mouse + drag | Rotate the object during precision manipulation |
 | Mouse wheel | Adjust placement distance during precision manipulation |

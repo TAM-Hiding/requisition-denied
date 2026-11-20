@@ -40,12 +40,21 @@ func refresh(actor: OtisController) -> void:
 	var rig := actor.get_node("ICF01_Wayfarer") as WayfarerRig
 	var core := copy_visual(rig.core, pivot)
 	core.name = "PreviewChassis"
+	# Inventory presents the existing neutral equipment mannequin even when
+	# the live chassis is crouching, prone or midway through traversal.
+	core.position = Vector3(0, 0.94, 0)
+	core.rotation = Vector3.ZERO
 	# Pose the visual copy from current ownership, independent of which render
 	# frame last animated the live chassis.
 	var item := actor.equipment.held_item()
 	var holding := item != null and not actor.equipment.placing
 	var gaze := clampf(actor.camera.rotation.x, -0.32, 0.38)
+	var preview_head := core.get_node(rig.core.get_path_to(rig.head)) as Node3D
+	preview_head.rotation = Vector3(gaze, 0, 0)
 	for limb in rig.limbs:
+		for joint_name in ["thigh", "shin", "foot"]:
+			var joint := core.get_node(rig.core.get_path_to(limb[joint_name])) as Node3D
+			joint.rotation = Vector3.ZERO
 		var shoulder := core.get_node(rig.core.get_path_to(limb.shoulder)) as Node3D
 		var forearm := core.get_node(rig.core.get_path_to(limb.forearm)) as Node3D
 		var hand := core.get_node(rig.core.get_path_to(limb.hand)) as Node3D
