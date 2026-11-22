@@ -16,6 +16,7 @@ var extension: float = 1.0
 var obstructed: bool = false
 var _previous_origin: Vector3
 var _previous_valid: bool = false
+var _at_prone_grip := false
 var _sweep_envelope: SphereShape3D
 
 func request_pose(pose: Pose) -> void:
@@ -24,6 +25,7 @@ func request_pose(pose: Pose) -> void:
 func configure(owner_actor: OtisController, equipment_anchor: Node3D) -> void:
 	actor = owner_actor
 	anchor = equipment_anchor
+	process_priority = 5
 
 func track(held: InteractableObject) -> void:
 	item = held
@@ -47,6 +49,7 @@ func track(held: InteractableObject) -> void:
 func clear() -> void:
 	item = null
 	profile = null
+	_at_prone_grip = false
 	_previous_valid = false
 	obstructed = false
 	extension = 1.0
@@ -83,7 +86,7 @@ func pose_origin_camera() -> Vector3:
 	return normal
 
 func sight_replaces_crosshair() -> bool:
-	if not aim_requested or aim_blend < 0.999 or not is_instance_valid(item) or not item.visible:
+	if uses_prone_grip() or not aim_requested or aim_blend < 0.999 or not is_instance_valid(item) or not item.visible:
 		return false
 	var tip := actor.camera.to_local(item.to_global(FasteningTool.REAR_SIGHT_TIP))
 	return absf(tip.x) < 0.001 and absf(tip.y) < 0.001 and -tip.z > actor.camera.near + 0.01
@@ -116,6 +119,36 @@ func travel_limit(space: PhysicsDirectSpaceState3D, retracted: Vector3, normal: 
 			allowed = minf(allowed, maxf(0, sphere_fraction - 0.015))
 	return allowed
 
+func uses_prone_grip() -> bool:
+	return is_instance_valid(item) and item.state == InteractableObject.State.HELD and actor.locomotion != null \
+		and actor.locomotion.posture == OtisLocomotion.Posture.PRONE
+
+func prone_grip_pose() -> Transform3D:
+	var rig := actor.get_node("ICF01_Wayfarer") as WayfarerRig
+	var grip := rig.right_grip()
+	var tool_handle := FasteningTool.HANDLE_CENTER if item is FasteningTool else Vector3.ZERO
+	return grip.global_transform * Transform3D(Basis.IDENTITY, -tool_handle)
+
+func prone_pose_clear(pose: Transform3D) -> bool:
+	if profile == null or profile.envelope == null:
+		return false
+	var parameters := query(profile.envelope, pose * profile.envelope_transform)
+	parameters.collision_mask = actor.collision_mask
+	return actor.get_world_3d().direct_space_state.intersect_shape(parameters, 1).is_empty()
+
+func update_prone_pose() -> void:
+	var transform := prone_grip_pose()
+	# Keep the owned instance aligned even if its blocked pose is hidden.
+	item.global_transform = transform
+	if prone_pose_clear(transform):
+		item.show()
+		extension = 1.0
+		obstructed = false
+	else:
+		item.hide()
+		extension = 0.0
+		obstructed = true
+
 func update_pose(delta: float) -> void:
 	# Pose requests persist even while an item is stowed; ownership never changes.
 	var speed: float = profile.pose_transition_speed if profile != null else 8.0
@@ -132,6 +165,15 @@ func update_pose(delta: float) -> void:
 	if profile.envelope == null:
 		item.hide()
 		obstructed = true
+		return
+	var prone := uses_prone_grip()
+	if prone != _at_prone_grip:
+		_at_prone_grip = prone
+		_previous_valid = false
+		extension = 1.0
+		lateral_shift = 0.0
+	if prone:
+		update_prone_pose()
 		return
 	var space := actor.get_world_3d().direct_space_state
 	var normal_camera := pose_origin_camera()

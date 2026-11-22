@@ -84,8 +84,9 @@ func enter() -> bool:
 	active = true
 	_otis.placement.set_input_suspended(true)
 	_otis.controls_enabled = false
-	camera.global_transform = _otis.camera.global_transform
-	camera.fov = _otis.camera.fov
+	var previous_camera := get_viewport().get_camera_3d()
+	camera.global_transform = previous_camera.global_transform
+	camera.fov = previous_camera.fov
 	camera.make_current()
 	if screen_ui != null:
 		screen_ui.set_active(true)
@@ -116,7 +117,7 @@ func leave() -> void:
 		screen_ui.set_active(false)
 		screen_ui.settings_panel.cleanup_pending = false
 	_otis.placement.set_input_suspended(false)
-	_otis.camera.make_current()
+	_otis.view_camera.restore_view()
 	_otis.controls_enabled = true
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	active_changed.emit(false)

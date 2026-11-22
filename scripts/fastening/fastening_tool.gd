@@ -3,6 +3,8 @@ extends InteractableObject
 
 const CAPACITY := 20
 const RANGE := 3.0
+const HANDLE_CENTER := Vector3(0, -0.035, 0.10)
+const MUZZLE := Vector3(0, 0.042, -0.19)
 const REAR_SIGHT_TIP := Vector3(0, 0.105, 0.115)
 const GRADES: Array[FastenerGrade] = [
 	preload("res://data/fasteners/standard.tres"),
@@ -67,20 +69,44 @@ func replenish() -> void:
 	while rounds.size() < CAPACITY:
 		rounds.append(system.create_round(GRADES[grade_index]))
 
+func aim_ray(camera: Camera3D, actor: PhysicsBody3D) -> Dictionary:
+	if actor is OtisController and actor.equipment.held_item() == self and actor.equipment.presentation.uses_prone_grip():
+		var presentation: HeldItemPresentation = actor.equipment.presentation
+		var pose := presentation.prone_grip_pose()
+		var origin := pose * MUZZLE
+		if presentation.station_active or not presentation.prone_pose_clear(pose) \
+				or not system.cast(pose * HANDLE_CENTER, origin, [actor.get_rid(), get_rid()], true, actor.collision_mask).is_empty():
+			return {"issue": "TOOL OBSTRUCTED"}
+		return {"issue": "", "origin": origin, "direction": -pose.basis.z, "prone": true}
+	return {"issue": "", "origin": camera.global_position, "direction": -camera.global_basis.z}
+
 func aim_feedback(camera: Camera3D, actor: PhysicsBody3D) -> Dictionary:
-	var origin := camera.global_position
-	var direction := -camera.global_basis.z
+	var ray := aim_ray(camera, actor)
+	if not ray.issue.is_empty():
+		return ray
+	var origin: Vector3 = ray.origin
+	var direction: Vector3 = ray.direction
+	var feedback: Dictionary
 	if removing:
 		var bolt := system.target_bolt(origin, direction, RANGE, actor)
-		return {"issue": "NO INTACT FASTENER TARGETED"} if bolt == null else {
-			"a": bolt.a, "b": bolt.b, "issue": "", "bolt": bolt,
+		feedback = {"issue": "NO INTACT FASTENER TARGETED"} if bolt == null else {
+			"a": bolt.a, "b": bolt.b, "issue": "", "bolt": bolt, "point": bolt.head(),
 		}
-	return system.probe(origin, direction, RANGE, actor)
+	else:
+		feedback = system.probe(origin, direction, RANGE, actor)
+	if ray.get("prone", false):
+		var end := origin + direction * RANGE
+		var hit := system.cast(origin, end, [actor.get_rid(), get_rid()], true, actor.collision_mask)
+		feedback.prone_point = feedback.get("point", hit.get("position", end))
+	return feedback
 
 func use(camera: Camera3D, actor: PhysicsBody3D) -> String:
+	var ray := aim_ray(camera, actor)
+	if not ray.issue.is_empty():
+		return ray.issue
 	if removing:
 		system.reconcile()
-		var target := system.target_bolt(camera.global_position, -camera.global_basis.z, RANGE, actor)
+		var target := system.target_bolt(ray.origin, ray.direction, RANGE, actor)
 		if target != null and not system.assembly_available(target.a):
 			return "PLACE ASSEMBLY BEFORE REMOVING FASTENERS"
 		if not system.remove(target):
@@ -95,7 +121,7 @@ func use(camera: Camera3D, actor: PhysicsBody3D) -> String:
 	if rounds.is_empty():
 		return "MAGAZINE EMPTY"
 	var bolt := rounds.back() as InstalledFastener
-	var issue := system.install(bolt, camera.global_position, -camera.global_basis.z, RANGE, actor)
+	var issue := system.install(bolt, ray.origin, ray.direction, RANGE, actor)
 	if not issue.is_empty():
 		return issue
 	rounds.pop_back()

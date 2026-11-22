@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="LocomotionTuning" load_steps=2 format=3]
+[ext_resource type="Script" path="res://scripts/locomotion/locomotion_tuning.gd" id="1"]
+[resource]
+script = ExtResource("1")
+sprint_multiplier = 1.6
+crouch_multiplier = 0.6
+crawl_multiplier = 0.3
+jump_height = 0.75
+posture_hold_seconds = 0.4

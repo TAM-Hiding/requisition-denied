@@ -2,8 +2,9 @@ class_name SatchelTuning
 extends Resource
 @export_group("Attachment")
 @export var vertical_offset := -0.31
-@export var horizontal_offset := 0.08
-@export var distance_from_back := 0.18
+## Across the rear mount, with negative values toward Otis's left.
+@export var horizontal_offset := 0.01
+@export var distance_from_back := 0.112
 @export var pitch_degrees := 4.0
 @export var yaw_degrees := -8.0
 @export var roll_degrees := -12.0

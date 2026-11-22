@@ -28,6 +28,7 @@ var application_focused := true
 var _mouse_mode_before_focus_loss := Input.MOUSE_MODE_VISIBLE
 
 func _ready() -> void:
+	otis.locomotion.feedback.connect(show_feedback)
 	inventory = InventoryScreen.new()
 	inventory.actor = get_parent().get_node("Otis")
 	add_child(inventory)
@@ -154,10 +155,14 @@ func _physics_process(delta: float) -> void:
 			help.text += "  •  1 Stow  •  X Drop Tool" if tool != null else "  •  1 Equip Tool"
 		if not otis.placement.is_supported_grab():
 			help.text += "  •  Hold Middle Mouse Rotate"
+	elif otis.view_camera.orbiting:
+		help.text = "Q/E or wheel tilt Orbit  •  K Return to gameplay camera"
 	elif tool != null:
 		help.text = "Hold G Grab  •  1 Stow  •  X Drop Tool  •  E Context  •  F3 Debug"
 	else:
-		help.text = "WASD Move  •  E Context  •  Hold E Stow  •  1 Equip  •  G Drop / hold to place or grab  •  Esc Cursor  •  F3 Debug  •  Terminal Settings"
+		help.text = "WASD Move / Shift+W Sprint / Space Jump-Climb / Alt Crouch-Hold Crawl  •  E Context  •  Hold E Stow  •  1 Equip  •  G Drop / hold to place or grab  •  Esc Cursor  •  F3 Debug  •  Terminal Settings"
+	if not placing and not otis.view_camera.orbiting:
+		help.text += "  •  C Camera  •  K Orbit"
 	status.visible = feedback_time > 0 or tool != null or not placing or not otis.placement.valid or socket != null
 	advance_hold(delta)
 	if gameplay_input_allowed():
@@ -181,7 +186,15 @@ func _physics_process(delta: float) -> void:
 		target = hit.collider
 		target_distance = otis.camera.global_position.distance_to(hit.position)
 	crosshair.visible = not menu_open and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
-		and not otis.equipment.presentation.sight_replaces_crosshair()
+		and not otis.view_camera.orbiting \
+		and (otis.view_camera.third_person or not otis.equipment.presentation.sight_replaces_crosshair()) \
+		and aim.get("issue") != "TOOL OBSTRUCTED"
+	var active_view := get_viewport().get_camera_3d()
+	var center := get_viewport().get_visible_rect().size * 0.5
+	var aim_point: Variant = aim.get("prone_point")
+	if aim_point is Vector3 and active_view != null and not active_view.is_position_behind(aim_point):
+		center = active_view.unproject_position(aim_point)
+	crosshair.position = center - crosshair.size * 0.5
 	crosshair.modulate = Color("a2e7df") if target != null else Color.WHITE
 	if menu_open:
 		prompt.text = ""
@@ -193,12 +206,13 @@ func _physics_process(delta: float) -> void:
 		prompt.text = "SEATING  •  Esc Cancel"
 	elif socket != null:
 		mount_issue = otis.placement.installation_feedback(socket)
-		prompt.text = "[E] Install  •  %s" % otis.placement.installation_name() if mount_issue.is_empty() else mount_issue
+		prompt.text = ("K Exit orbit to install" if otis.view_camera.orbiting
+			else "[E] Install  •  %s" % otis.placement.installation_name()) if mount_issue.is_empty() else mount_issue
 	elif placing:
 		var placement := otis.placement
 		prompt.text = "%s  |  %s" % [
 			"ROTATING" if placement.rotating else "PLACEMENT", "CLEAR" if placement.valid else "BLOCKED"]
-	elif target != null:
+	elif target != null and not otis.view_camera.orbiting:
 		prompt.text = "[E]  " + target.definition.display_name
 	else:
 		prompt.text = ""
@@ -219,10 +233,13 @@ func _physics_process(delta: float) -> void:
 		target.state_name() if target != null else "—",
 		held.definition.object_id if held != null else &"none",
 		otis.equipment.stored_items().size(), str(otis.placement.is_grabbing())]
+	debug_label.text += "\nPOSTURE  %s · SPRINT %s · CLIMB %s · LOAD %.0f%%" % [
+		OtisLocomotion.Posture.keys()[otis.locomotion.posture], otis.locomotion.sprinting,
+		otis.locomotion.climbing, otis.locomotion.load_modifiers.ratio * 100.0]
 	debug_label.text += "\nEQUIPMENT STATE  " + ("HELD" if held != null else ("STOWED" if not otis.equipment.stored_items().is_empty() else "EMPTY"))
 
 	debug_label.text += "\nHELD OBSTRUCTED  %s\nMOVEMENT LIMIT  %.2f m/s" % [
-		str(otis.equipment.presentation.obstructed), otis.movement_speed * (1.0 - 0.25 * otis.placement.load_fraction())]
+		str(otis.equipment.presentation.obstructed), otis.locomotion.current_speed]
 
 	debug_label.text += "\nEQUIPMENT POSE  " + HeldItemPresentation.Pose.keys()[otis.equipment.presentation.requested_pose]
 
@@ -269,6 +286,10 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		terminal.route(event)
+		get_viewport().set_input_as_handled()
+		return
+	if not menu_open and otis.view_camera.route(event):
+		cancel_hold()
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey and event.echo:
@@ -411,7 +432,7 @@ func station_for(object: InteractableObject) -> TerminalInteraction:
 	return null
 
 func gameplay_input_allowed() -> bool:
-	return application_focused and not menu_open and active_station() == null and otis.controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	return application_focused and not menu_open and active_station() == null and not otis.locomotion.climbing and otis.controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
 
 func cancel_hold() -> void:
 	e_pending = false

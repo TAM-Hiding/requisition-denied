@@ -38,10 +38,14 @@ func run() -> void:
 	await frames(5)
 	check(facility.get_node_or_null("SteelPlate") == null and facility.get_node_or_null("TriangularGusset") == null,
 		"Obsolete authored scrap is absent from the development chamber")
-	var satchel: Node3D = actor.get_node("ICF01_Wayfarer").core.get_node("RearEquipmentMount/IndustrialSatchel")
+	var rig := actor.get_node("ICF01_Wayfarer") as WayfarerRig
+	var satchel := rig.core.get_node("RearEquipmentMount/IndustrialSatchel") as Node3D
 	var tuning: SatchelTuning = satchel.get("tuning")
 	check(satchel.transform.is_equal_approx(tuning.attachment_transform()) and tuning.roll_degrees != 0
 		and tuning.vertical_offset < -0.21, "Messenger attachment uses the saved lower diagonal configuration")
+	check(satchel.position.is_equal_approx(Vector3(0.01, -0.31, 0.112)),
+		"Messenger attachment shifts 7 cm to Otis's left at the same height and depth")
+	check_live_attachment(actor, rig, satchel)
 	var wrench := facility.get_node("Wrench") as InteractableObject
 	var tool: FasteningTool = facility.get("bolt_tool")
 	check(eq.store_world(wrench).ok and eq.store_world(tool).ok, "Physical context fixtures preserve original tools")
@@ -75,7 +79,6 @@ func run() -> void:
 	screen.perform_action(0)
 	check(eq.held_item() == tool and not eq.container.contains(tool), "Bag context equips directly from storage")
 	var preview_core := screen.preview.pivot.get_child(0) as Node3D
-	var rig := actor.get_node("ICF01_Wayfarer") as WayfarerRig
 	var shoulder_path := rig.core.get_path_to(rig.limbs[1].shoulder)
 	check(absf((preview_core.get_node(shoulder_path) as Node3D).rotation.x - 0.38) < 0.001,
 		"Preview displays the equipped arm immediately")
@@ -178,6 +181,36 @@ func run() -> void:
 	await process_frame
 	print("RD-012 corrections: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures else 0)
+
+func check_live_attachment(actor: OtisController, rig: WayfarerRig, satchel: Node3D) -> void:
+	var shell := satchel.get_node("SatchelShell") as Node3D
+	var bag_body := shell.get_child(0) as MeshInstance3D
+	var strap := satchel.get_node("ShoulderStrap") as Node3D
+	var shoulder_segment := strap.get_child(3) as MeshInstance3D
+	var shell_half_depth := (bag_body.mesh as BoxMesh).size.z * 0.5
+	satchel._process(2.0)
+	var back := shell.transform * Vector3(0, 0, -shell_half_depth)
+	check(is_equal_approx(back.z, -shell_half_depth)
+		and satchel.get_parent().transform.origin.z + (satchel.transform * back).z < 0.17,
+		"An empty bag keeps its inward face within 17 cm of the torso centerline")
+	var over_shoulder := rig.core.to_local(shoulder_segment.global_position)
+	check(over_shoulder.distance_to(Vector3(-0.13, 0.58, 0)) < 0.01,
+		"The strap crosses just over the left shoulder beam")
+	var shell_bounds := bag_body.get_aabb()
+	var first := strap.get_child(0) as MeshInstance3D
+	var last := strap.get_child(strap.get_child_count() - 1) as MeshInstance3D
+	var start := first.transform * (Vector3.DOWN * ((first.mesh as BoxMesh).size.y * 0.5 - 0.008))
+	var end := last.transform * (Vector3.UP * ((last.mesh as BoxMesh).size.y * 0.5 - 0.008))
+	check(shell_bounds.has_point(shell.transform.affine_inverse() * start)
+		and shell_bounds.has_point(shell.transform.affine_inverse() * end),
+		"Both ends of the wrap enter the shell even when empty")
+	var bag_pose := rig.core.global_transform.affine_inverse() * satchel.global_transform
+	for posture in [OtisLocomotion.Posture.CROUCHING, OtisLocomotion.Posture.PRONE, OtisLocomotion.Posture.STANDING]:
+		var accepted := actor.locomotion.request_posture(posture)
+		rig.animate(1.0, false, false)
+		check(accepted and (rig.core.global_transform.affine_inverse() * satchel.global_transform).is_equal_approx(bag_pose)
+			and rig.core.to_local(shoulder_segment.global_position).is_equal_approx(over_shoulder),
+			"Bag and shoulder loop stay torso-relative in " + OtisLocomotion.Posture.keys()[posture])
 
 func expanded_capacity(world: Node3D) -> void:
 	var container := InventoryContainer.new()

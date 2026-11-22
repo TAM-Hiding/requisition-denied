@@ -36,11 +36,12 @@ func run() -> void:
 	var before := actor.global_transform
 	var look := actor.camera.transform
 	var chassis := actor.chassis
-	rig.set_inspection(1)
-	check(rig.visible and rig.inspection_camera.is_current() and actor.global_transform == before
+	actor.view_camera.set_orbiting(true)
+	check(rig.visible and actor.view_camera.is_current() and actor.global_transform == before
 		and actor.camera.transform == look and actor.chassis == chassis, "Inspection only replaces the rendered viewpoint")
-	rig.set_inspection(2)
-	check(actor.to_local(rig.inspection_camera.global_position).z > 0.0, "Rear inspection shows the spine")
+	actor.view_camera.rotate_orbit(PI)
+	actor.view_camera.tick(1.0)
+	check(actor.to_local(actor.view_camera.global_position).z > 0.0, "Rear inspection shows the spine")
 	var tool: FasteningTool = facility.get("bolt_tool")
 	check(actor.equipment.pick_up(tool).ok, "Uni-Bolt still equips through the gameplay controller")
 	rig.update_display_item(tool)
@@ -76,7 +77,7 @@ func run() -> void:
 		and alignment.transform == grip.transform,
 		"Aiming bounds wrist flexion while preserving the exact grip sockets")
 	actor.set_tool_aiming(false)
-	rig.set_inspection(0)
+	actor.view_camera.set_orbiting(false)
 	check(actor.camera.is_current() and not rig.visible and rig.display_meshes.is_empty()
 		and actor.equipment.stow().ok, "First person and gameplay equipment resume after inspection")
 	facility.queue_free()
