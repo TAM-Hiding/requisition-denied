@@ -1,0 +1,16 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/world/engineering_test_hall.gd" id="1"]
+
+[node name="EngineeringTestHall" type="Node3D"]
+script = ExtResource("1")
+
+[node name="Shell" type="Node3D" parent="."]
+
+[node name="Steelwork" type="Node3D" parent="."]
+
+[node name="Mezzanine" type="Node3D" parent="."]
+
+[node name="Lighting" type="Node3D" parent="."]
+
+[node name="Markings" type="Node3D" parent="."]

@@ -30,7 +30,7 @@ func _ready() -> void:
 	var floor := box(self, "Floor", Vector3(12.4, 0.3, 12.4), Vector3(0, -0.15, 0), floor_mat, true)
 	box(self, "Ceiling", Vector3(12.4, 0.3, 12.4), Vector3(0, 4.15, 0), dark, true)
 	box(self, "NorthWall", Vector3(12.4, 4, 0.2), Vector3(0, 2, -6.1), wall_mat, true)
-	box(self, "SouthWall", Vector3(12.4, 4, 0.2), Vector3(0, 2, 6.1), wall_mat, true)
+	build_hall_opening(wall_mat, dark)
 	box(self, "WestWall", Vector3(0.2, 4, 12), Vector3(-6.1, 2, 0), wall_mat, true)
 	box(self, "EastWall", Vector3(0.2, 4, 12), Vector3(6.1, 2, 0), wall_mat, true)
 	for x in [-5.9, 5.9]:
@@ -85,6 +85,22 @@ func _ready() -> void:
 	build_load_station(floor as StaticBody3D, dark, amber, steel)
 	build_fastening_station(crate, dark, amber, steel)
 	build_scrap_rack(dark, amber, steel)
+
+func build_hall_opening(wall_mat: Material, frame: Material) -> void:
+	const CLEAR_HALF_WIDTH := 0.90
+	const CLEAR_HEIGHT := 2.45
+	const TRIM := 0.075
+	var side_width := 6.2 - CLEAR_HALF_WIDTH
+	for side in [-1.0, 1.0]:
+		box(self, "SouthWallWest" if side < 0 else "SouthWallEast", Vector3(side_width, 4, 0.2),
+			Vector3(side * (CLEAR_HALF_WIDTH + side_width / 2), 2, 6.1), wall_mat, true)
+		box(self, "HallDoorJamb", Vector3(TRIM, CLEAR_HEIGHT, 0.27),
+			Vector3(side * (CLEAR_HALF_WIDTH + TRIM / 2), CLEAR_HEIGHT / 2, 6.1), frame)
+	var lintel_height := 4.0 - CLEAR_HEIGHT
+	box(self, "HallDoorLintel", Vector3(2 * CLEAR_HALF_WIDTH, lintel_height, 0.2),
+		Vector3(0, CLEAR_HEIGHT + lintel_height / 2, 6.1), wall_mat, true)
+	box(self, "HallDoorHead", Vector3(2 * (CLEAR_HALF_WIDTH + TRIM), TRIM, 0.27),
+		Vector3(0, CLEAR_HEIGHT + TRIM / 2, 6.1), frame)
 
 func build_machinery(floor: StaticBody3D, dark: Material, amber: Material) -> void:
 	var foundation := MechanicalAssembly.new()
