@@ -2,6 +2,9 @@
 
 Linux-first, low-poly immersive systems game built with **Godot 4.7.2 / GDScript**.
 
+RD-014B adds an in-game layout editor to the Engineering Test Hall. Press **L** on the hall floor.
+See the [editor controls and JSON layout format](docs/layout-editor/README.md).
+
 RD-014A connects the Systems Test Chamber to a 60 × 80 ft Engineering Test Hall.
 See the [hall layout and playtest route](docs/engineering-test-hall/README.md).
 

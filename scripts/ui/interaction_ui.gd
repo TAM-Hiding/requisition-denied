@@ -1,6 +1,7 @@
 extends CanvasLayer
 var service := InteractionService.new()
 var inventory: InventoryScreen
+var layout_editor: LayoutEditor
 var hud: Control
 var target: InteractableObject
 var menu_target: InteractableObject
@@ -33,10 +34,15 @@ func _ready() -> void:
 	inventory.actor = get_parent().get_node("Otis")
 	add_child(inventory)
 	inventory.opening.connect(cancel_hold)
+	layout_editor = LayoutEditor.new()
+	layout_editor.name = "LayoutEditor"
+	layout_editor.configure(get_parent().get_node("EngineeringTestHall"), otis)
+	add_child(layout_editor)
 	hud = Control.new()
 	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(hud)
+	layout_editor.active_changed.connect(func(enabled: bool) -> void: hud.visible = not enabled)
 	var heading := Label.new()
 	heading.text = "REQUISITION DENIED   /   DEVELOPMENT"
 	heading.position = Vector2(24, 18)
@@ -122,7 +128,7 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _physics_process(delta: float) -> void:
-	if inventory.active:
+	if inventory.active or layout_editor.active:
 		return
 	var tool := otis.equipped_tool()
 	if tool != null:
@@ -163,6 +169,8 @@ func _physics_process(delta: float) -> void:
 		help.text = "WASD Move / Shift+W Sprint / Space Jump-Climb / Alt Crouch-Hold Crawl  •  E Context  •  Hold E Stow  •  1 Equip  •  G Drop / hold to place or grab  •  Esc Cursor  •  F3 Debug  •  Terminal Settings"
 	if not placing and not otis.view_camera.orbiting:
 		help.text += "  •  C Camera  •  K Orbit"
+		if layout_editor.can_enter():
+			help.text += "  •  L Layout"
 	status.visible = feedback_time > 0 or tool != null or not placing or not otis.placement.valid or socket != null
 	advance_hold(delta)
 	if gameplay_input_allowed():
@@ -271,6 +279,21 @@ func _input(event: InputEvent) -> void:
 		return
 	if inventory.active:
 		inventory.route(event)
+		return
+	if layout_editor.active:
+		if layout_editor.route(event):
+			get_viewport().set_input_as_handled()
+		return
+	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_L \
+			and not menu_open and active_station() == null and otis.controls_enabled \
+			and not otis.locomotion.climbing and not otis.placement.is_active():
+		if layout_editor.can_enter():
+			suspend_tool_input()
+			cancel_hold()
+			layout_editor.enter()
+		else:
+			show_feedback("Layout mode is available on the Engineering Test Hall floor.")
+		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("inventory_toggle") and active_station() == null and not menu_open:
 		if not event.is_echo():
@@ -527,7 +550,7 @@ func _notification(what: int) -> void:
 		application_focused = true
 		cancel_hold()
 		if is_instance_valid(otis) and is_instance_valid(otis.placement):
-			otis.placement.set_input_suspended(active_station() != null or inventory.active)
+			otis.placement.set_input_suspended(active_station() != null or inventory.active or layout_editor.active)
 		Input.mouse_mode = _mouse_mode_before_focus_loss
 
 func apply_mechanical_settings() -> void:
