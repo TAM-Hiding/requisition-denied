@@ -211,7 +211,32 @@ func climb_checks() -> void:
 	print("LEDGE CANDIDATE ", candidate)
 	check(not candidate.is_empty() and movement.try_climb(), "Space-range detection finds a supported ledge and clear path")
 	check(movement.climbing and not movement.sprinting, "Ledge traversal owns movement and disables sprint")
-	await frames(90)
+	var rig := actor.get_node("ICF01_Wayfarer") as WayfarerRig
+	var elapsed := 0
+	var previous := 0.0
+	var progressed := true
+	var closest_hand := INF
+	var expected_time := movement.tuning.climb_time(movement.climb_variant)
+	while movement.climbing and elapsed < 90:
+		await frames(1)
+		elapsed += 1
+		if movement.climbing:
+			progressed = progressed and movement.climb_progress > previous and movement.climb_progress <= 1.0
+			previous = movement.climb_progress
+			if previous >= 0.20 and previous <= 0.49:
+				for limb in rig.limbs:
+					var fingertip: Vector3 = limb.hand.to_global(Vector3(0, -0.09, -0.02))
+					var edge: Vector3 = movement.climb_edge + actor.global_basis.x * limb.side * 0.20
+					closest_hand = minf(closest_hand, fingertip.distance_to(edge))
+	check(closest_hand < 0.23, "A short ledge climb visibly braces a hand near the ledge edge")
+	check(progressed and previous > 0.90, "Climb presentation advances along the validated physical path")
+	check(absf(float(elapsed) / Engine.physics_ticks_per_second - expected_time) < 0.05,
+		"Collision-checked traversal follows its configured variant timing within physics tick rounding")
+	check(movement.climb_variant == -1 and movement.climb_progress == 0,
+		"Completed traversal clears its animation state")
+	await frames(45)
+	check(rig.core.rotation.length() < 0.01 and absf(rig.core.position.z) < 0.01,
+		"Completed traversal returns the torso pose to rest")
 	print("CLIMB END ",actor.position," ",movement.last_feedback)
 	check(not movement.climbing and actor.position.y > 0.63 and actor.position.z < -1.9,
 		"Two collision-checked movement stages put Otis onto the low ledge")
@@ -248,6 +273,8 @@ func climb_checks() -> void:
 	trap.position = actor.position + Vector3(0, 1.85, 0)
 	await frames(25)
 	check(not movement.climbing and movement.last_feedback.contains("obstructed"), "A new obstruction stops traversal at the last valid pose")
+	check(movement.climb_variant == -1 and movement.climb_progress == 0 and rig.core.rotation.length() < 0.02,
+		"Interrupted traversal clears its animation state and recovers the torso pose")
 	trap.queue_free()
 	await frames(50)
 	await reset(Vector3(-3, 0.03, -1.25))
@@ -258,6 +285,34 @@ func climb_checks() -> void:
 	check(not movement.climbing and movement.last_feedback.contains("Support moved"), "Moving support invalidates an active climb")
 	(world.get_node("LowLedge") as Node3D).position.x -= 0.1
 	await reset()
+
+func climb_variant_checks() -> void:
+	const Poses = preload("res://scripts/character/wayfarer_climb_poses.gd")
+	var early: Array[Vector4] = []
+	var sequence: Array[int] = []
+	var variant_count := OtisLocomotion.ClimbVariant.size()
+	movement.climb_random.seed = 13
+	for index in range(60):
+		sequence.append(movement._next_climb_variant())
+		if index >= 2 and sequence[index] == sequence[index - 1] and sequence[index] == sequence[index - 2]:
+			check(false, "A climb variant cannot occur three times in a row")
+			break
+	check(sequence.size() == 60, "Seeded climb selection avoids three consecutive repeats")
+	for variant in variant_count:
+		check(sequence.has(variant), "The seeded selector can choose each climb variant")
+		early.append(Poses.sample(variant, 0.22)[2])
+		check(Poses.sample(variant, 0) == Poses.REST and Poses.sample(variant, 1) == Poses.REST,
+			"Each animation starts and ends in the ordinary standing pose")
+		var duration := movement.tuning.climb_time(variant)
+		check(duration >= 0.5 and duration <= 0.85, "Each climb variant stays within the requested timing bounds")
+	check(early[0].x - early[0].y > 0.45 and absf(early[1].x - early[1].y) < 0.15
+		and early[2].y - early[2].x > 0.65,
+		"Scramble catches left, maintenance hoist uses both hands, and awkward recovery catches right")
+	var tuck: Vector4 = Poses.sample(OtisLocomotion.ClimbVariant.SCRAMBLE, 0.50)[3]
+	var step: Vector4 = Poses.sample(OtisLocomotion.ClimbVariant.MAINTENANCE_HOIST, 0.66)[3]
+	var twist: Vector3 = Poses.sample(OtisLocomotion.ClimbVariant.AWKWARD_RECOVERY, 0.43)[0]
+	check(tuck.z < -1.6 and tuck.w < -1.6 and step.x - step.y > 0.9 and twist.y > 0.35,
+		"Scramble tucks both knees, maintenance hoist steps one leg first, and awkward recovery twists the torso")
 
 func rig_checks() -> void:
 	var rig := actor.get_node("ICF01_Wayfarer") as WayfarerRig
@@ -462,6 +517,7 @@ func run() -> void:
 	await jump_checks()
 	await posture_checks()
 	await climb_checks()
+	climb_variant_checks()
 	await rig_checks()
 	await carried_load_checks()
 	release_actions()

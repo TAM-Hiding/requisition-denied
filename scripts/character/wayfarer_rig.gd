@@ -21,8 +21,6 @@ var limbs: Array[Dictionary] = []
 var gait_phase := 0.0
 var time_alive := 0.0
 var previous_yaw := 0.0
-var inspection_side := 0
-var inspection_camera: Camera3D
 var displayed_item: InteractableObject
 var display_meshes: Dictionary
 var original_layers: Dictionary
@@ -50,12 +48,6 @@ func _ready() -> void:
 		limbs.append({"side": side, "label": label, "shoulder": shoulder, "forearm": forearm,
 			"hand": hand, "thigh": thigh, "shin": shin, "foot": foot})
 
-	inspection_camera = Camera3D.new()
-	inspection_camera.name = "WayfarerInspectionCamera"
-	inspection_camera.top_level = true
-	inspection_camera.fov = 46.0
-	inspection_camera.cull_mask = (actor.get_node("Camera3D") as Camera3D).cull_mask & ~FIRST_PERSON_ITEM
-	add_child(inspection_camera)
 
 func mount(parent: Node3D, slot: String, definition: ChassisModuleDefinition, side: float) -> Node3D:
 	var module := definition.instantiate_module()
@@ -92,47 +84,13 @@ func replace_forearm(side_index: int, definition: ChassisModuleDefinition) -> bo
 	limb.forearm = replacement
 	return true
 
-func _unhandled_key_input(event: InputEvent) -> void:
-	if not OS.is_debug_build() or not actor.controls_enabled or not event is InputEventKey or event.is_echo():
-		return
-	if event.pressed and event.physical_keycode == KEY_K and not event.ctrl_pressed and not event.alt_pressed 			and not event.shift_pressed and not event.meta_pressed:
-		set_inspection((inspection_side + 1) % 3)
-		get_viewport().set_input_as_handled()
-
-func set_inspection(view: int) -> void:
-	inspection_side = view
-	visible = view != 0
-	if visible:
-		update_camera()
-		inspection_camera.make_current()
-	else:
-		clear_display_item()
-		if inspection_camera.is_current():
-			actor.camera.make_current()
-
-func update_camera() -> void:
-	var low := actor.locomotion.posture == OtisLocomotion.Posture.PRONE if actor.locomotion != null else false
-	var crouched := actor.locomotion.posture == OtisLocomotion.Posture.CROUCHING if actor.locomotion != null else false
-	var focus := actor.to_global(Vector3(0, 0.35 if low else (0.65 if crouched else 0.96), 0))
-	var desired := actor.to_global(Vector3(1.35, 0.9 if low else (1.2 if crouched else 1.47), -3.05 if inspection_side == 1 else 3.05))
-	var query := PhysicsRayQueryParameters3D.create(focus, desired, 17, [actor.get_rid()])
-	var hit := actor.get_world_3d().direct_space_state.intersect_ray(query)
-	if not hit.is_empty():
-		desired = hit.position.lerp(focus, 0.06)
-	if desired.distance_squared_to(focus) > 0.01:
-		inspection_camera.global_position = desired
-		inspection_camera.look_at(focus)
-
 func _process(delta: float) -> void:
 	if actor.equipment == null:
 		return
-	if inspection_side != 0 and not inspection_camera.is_current():
-		set_inspection(0)
 	var held := actor.equipment.held_item()
 	var holding := is_instance_valid(held) and not actor.equipment.placing
 	animate(delta, holding, actor.placement.is_active())
-	if inspection_side != 0:
-		update_camera()
+	if visible:
 		update_display_item(held if holding and held.visible else null)
 
 static func resting_wrist(side: float) -> Basis:
@@ -149,19 +107,37 @@ func animate(delta: float, holding: bool, manipulating: bool) -> void:
 	var crouched := actor.locomotion != null and actor.locomotion.posture == OtisLocomotion.Posture.CROUCHING
 	var prone := actor.locomotion != null and actor.locomotion.posture == OtisLocomotion.Posture.PRONE
 	var climbing := actor.locomotion != null and actor.locomotion.climbing
+	var climb_pose: Array = []
+	var ledge_brace := 0.0
+	if climbing:
+		var progress := actor.locomotion.climb_progress
+		climb_pose = preload("res://scripts/character/wayfarer_climb_poses.gd").sample(
+			actor.locomotion.climb_variant, progress)
+		# A short ledge calls for a deep brace instead of an overhead pull.
+		ledge_brace = (1.0 - smoothstep(0.65, 1.15, actor.locomotion.climb_rise)) \
+			* smoothstep(0, 0.19, progress) * (1.0 - smoothstep(0.60, 0.87, progress))
 	var stride := clampf(movement / maxf(actor.movement_speed, 0.01), 0.0, 1.0)
 	gait_phase = fposmod(gait_phase + movement * delta * 2.8, TAU)
 	var yaw_delta := angle_difference(previous_yaw, actor.rotation.y)
 	previous_yaw = actor.rotation.y
-	var blend := 1.0 - exp(-12.0 * delta)
+	var blend := 1.0 - exp((-26.0 if climbing else -12.0) * delta)
 	var turning := clampf(yaw_delta / maxf(delta, 0.001), -2.0, 2.0)
 	# Articulate the same joints/geometry. The original standing-forward
 	# amplitudes and phase rate remain the reference gait.
 	position = position.lerp(Vector3(0, 0.25, 0.85) if prone else Vector3.ZERO, blend)
 	rotation.x = lerp_angle(rotation.x, -PI / 2 if prone else 0.0, blend)
-	core.position.y = lerpf(core.position.y, (0.465 if crouched else 0.94) + 0.013 * absf(sin(gait_phase)) * stride, blend)
-	core.rotation.x = lerpf(core.rotation.x, 0.12 if crouched else 0.0, blend)
-	core.rotation.z = lerpf(core.rotation.z, turning * 0.026, blend)
+	var core_height := (0.465 if crouched else 0.94) + 0.013 * absf(sin(gait_phase)) * stride
+	var core_angles := Vector3(0.12 if crouched else 0.0, 0, turning * 0.026)
+	var core_forward := 0.0
+	if climbing:
+		core_height += climb_pose[1].x
+		core_forward = climb_pose[1].y
+		core_angles = climb_pose[0]
+		core_angles.x = lerpf(core_angles.x, -1.08, ledge_brace)
+		core_height = lerpf(core_height, 0.46, ledge_brace)
+		core_forward *= 1.0 - ledge_brace * 0.75
+	core.position = core.position.lerp(Vector3(0, core_height, -core_forward), blend)
+	core.rotation = core.rotation.lerp(core_angles, blend)
 	var gaze := clampf(actor.camera.rotation.x, -0.32, 0.38)
 	head.rotation.x = lerpf(head.rotation.x, gaze + (PI / 2 if prone else 0.0) + sin(time_alive * 1.8) * 0.018, blend)
 	head.rotation.y = lerpf(head.rotation.y, turning * 0.12, blend)
@@ -183,8 +159,11 @@ func animate(delta: float, holding: bool, manipulating: bool) -> void:
 			hip_goal = wave * stride * 0.15
 			knee_goal = -0.12 - maxf(0.0, wave) * stride * 0.28
 		elif climbing:
-			hip_goal = 0.45
-			knee_goal = -0.8
+			var index := 0 if limb.side < 0 else 1
+			hip_goal = climb_pose[3][index]
+			knee_goal = climb_pose[3][index + 2]
+			hip_goal += ledge_brace * 0.36
+			knee_goal -= ledge_brace * 0.47
 		thigh.rotation.x = lerpf(thigh.rotation.x, hip_goal, blend)
 		thigh.rotation.z = lerpf(thigh.rotation.z, -wave * stride * lateral * 0.24, blend)
 		thigh.rotation.y = lerpf(thigh.rotation.y, turning * 0.06 * limb.side, blend)
@@ -194,20 +173,45 @@ func animate(delta: float, holding: bool, manipulating: bool) -> void:
 		var reaching: bool = tool_hand or manipulating
 		var reach := 0.3 if manipulating else (0.59 if actor.tool_aiming else 0.38)
 		var arm_goal := reach if reaching else -leg_swing * stride * 0.21
+		var arm_roll: float = limb.side * (0.09 if reaching else 0.04)
+		var elbow_goal := (1.10 if actor.tool_aiming else 0.83) if tool_hand else (0.64 if manipulating else 0.10)
 		if prone and not tool_hand:
 			arm_goal = 2.8 + wave * stride * 0.18
 		elif climbing and not tool_hand:
-			arm_goal = 1.9
+			var index := 0 if limb.side < 0 else 1
+			arm_goal = climb_pose[2][index]
+			elbow_goal = climb_pose[2][index + 2]
+			var plant := ledge_brace * smoothstep(0.50, 1.20, arm_goal)
+			if plant > 0.0:
+				var brace := short_ledge_arm_pose(shoulder, forearm, limb.side)
+				arm_goal = lerpf(arm_goal, brace.x, plant)
+				elbow_goal = lerpf(elbow_goal, brace.y, plant)
+				arm_roll *= 1.0 - plant
 		shoulder.rotation.x = lerpf(shoulder.rotation.x, arm_goal, blend)
-		shoulder.rotation.z = lerpf(shoulder.rotation.z, limb.side * (0.09 if reaching else 0.04), blend)
-		forearm.rotation.x = lerpf(forearm.rotation.x, (1.10 if actor.tool_aiming else 0.83) if tool_hand
-			else (0.64 if manipulating else 0.10), blend)
+		shoulder.rotation.z = lerpf(shoulder.rotation.z, arm_roll, blend)
+		forearm.rotation.x = lerpf(forearm.rotation.x, elbow_goal, blend)
 		if prone and not tool_hand:
 			forearm.rotation.x = lerpf(forearm.rotation.x, 0.65 - wave * stride * 0.12, blend)
 		var wrist_goal := Basis.IDENTITY if prone else resting_wrist(limb.side)
+		if climbing and not tool_hand:
+			wrist_goal = wrist_goal.slerp(Basis(Vector3.RIGHT, -0.32), smoothstep(0.45, 1.0, arm_goal))
 		if reaching:
 			wrist_goal = Basis(Vector3.RIGHT, clampf(gaze - shoulder.rotation.x - forearm.rotation.x, -0.70, 0.70)) if tool_hand else Basis.IDENTITY
 		hand.quaternion = hand.quaternion.slerp(wrist_goal.get_rotation_quaternion(), blend)
+
+func short_ledge_arm_pose(shoulder: Node3D, forearm: Node3D, side: float) -> Vector2:
+	# Fit the shoulder/elbow hinges in their shared pitch plane. The pose track
+	# controls hand timing and body motion. Contact is cosmetic.
+	var edge := actor.locomotion.climb_edge + actor.global_basis.x * side * 0.20
+	edge.y += 0.025
+	var offset: Vector3 = (shoulder.get_parent() as Node3D).to_local(edge)
+	var reach := Vector2(-offset.y, -offset.z)
+	var upper: float = (forearm.get_parent() as Node3D).position.length()
+	var lower: float = (forearm.get_node("WristConnection") as Node3D).position.length() + 0.075
+	var distance := clampf(reach.length(), absf(upper - lower) + 0.05, upper + lower - 0.005)
+	var elbow := acos(clampf((distance * distance - upper * upper - lower * lower) / (2.0 * upper * lower), -1, 1))
+	var pitch := reach.angle() - atan2(lower * sin(elbow), upper + lower * cos(elbow))
+	return Vector2(clampf(pitch, -0.2, 1.85), minf(elbow, 1.8))
 
 func update_display_item(item: InteractableObject) -> void:
 	if displayed_item != item:

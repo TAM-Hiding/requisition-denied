@@ -210,6 +210,9 @@ func run() -> void:
 	var pose := actor.global_transform
 	ui.e_pending = true
 	ui.e_elapsed = 0.3
+	actor.view_camera.set_orbiting(true)
+	actor.view_camera.rotate_orbit(0.6)
+	var orbit_heading := actor.view_camera.orbit_angle
 	check(screen.show_inventory(ui.hud) and not actor.controls_enabled and actor.placement.input_suspended,
 		"Inventory owns gameplay input while the Facility keeps simulating")
 	check(not ui.e_pending, "Opening cancels a pending E hold")
@@ -236,7 +239,8 @@ func run() -> void:
 	check(not screen.turn_left and not screen.turn_right, "Focus loss clears preview rotation input")
 	ui._notification(NOTIFICATION_APPLICATION_FOCUS_IN)
 	screen.hide_inventory()
-	check(actor.controls_enabled and not actor.placement.input_suspended and actor.camera.is_current(),
+	check(actor.controls_enabled and not actor.placement.input_suspended and actor.view_camera.is_current()
+		and actor.view_camera.orbiting and is_equal_approx(actor.view_camera.orbit_angle, orbit_heading),
 		"Closing restores gameplay and the existing camera")
 	check(not container.items().has(wrench) and eq.held_item() == tool, "UI never duplicates container or equipment records")
 	facility.queue_free()

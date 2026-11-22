@@ -27,5 +27,10 @@ extends Resource
 @export var ledge_reach := 0.85
 @export var minimum_ledge_rise := 0.25
 @export var maximum_ledge_rise := 1.35
-@export var climb_duration := 0.85
+@export_range(0.5, 0.85, 0.01) var climb_duration := 0.85
+## Timing adjustments for Scramble, Maintenance Hoist and Awkward Recovery respectively.
+@export var climb_variant_duration_offsets := Vector3(-0.06, 0.0, -0.03)
 @export var support_motion_tolerance := 0.03
+
+func climb_time(variant: int) -> float:
+	return clampf(climb_duration + climb_variant_duration_offsets[variant], 0.5, 0.85)

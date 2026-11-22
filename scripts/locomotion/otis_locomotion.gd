@@ -3,10 +3,16 @@ extends Node
 ## Posture/traversal state owns the character collider; ownership stays in equipment.
 signal feedback(message: String)
 enum Posture { STANDING, CROUCHING, PRONE }
+enum ClimbVariant { SCRAMBLE, MAINTENANCE_HOIST, AWKWARD_RECOVERY }
 @export var tuning: LocomotionTuning = preload("res://data/locomotion/wayfarer_movement.tres")
 var posture := Posture.STANDING
 var sprinting := false
 var climbing := false
+var climb_variant := -1
+var climb_progress := 0.0
+var climb_edge := Vector3.ZERO
+var climb_rise := 0.0
+var climb_random := RandomNumberGenerator.new()
 var last_feedback := ""
 var local_motion := Vector3.ZERO
 var current_speed := 0.0
@@ -17,6 +23,9 @@ var _jump_pending := false
 var _profiles: Array[Dictionary] = []
 var _climb_path: Array[Vector3] = []
 var _climb_speed := 0.0
+var _climb_distance := 0.0
+var _last_variant := -1
+var _variant_streak := 0
 var _support: PhysicsBody3D
 var _support_pose := Transform3D.IDENTITY
 @onready var actor := get_parent() as OtisController
@@ -197,7 +206,13 @@ func tick(delta: float) -> void:
 		actor.velocity.y -= actor.gravity * delta
 	elif actor.velocity.y <= 0:
 		actor.velocity.y = 0
+	# CharacterBody3D handles collision and sliding before the contacted bodies
+	# receive any impulse. Idle, airborne and dedicated manipulation cannot push.
+	var approach := actor.velocity
+	var can_push := enabled and not axis.is_zero_approx() and not interaction_restricted()
 	actor.move_and_slide()
+	if can_push and actor.is_on_floor():
+		ContactPush.apply(actor, approach, delta)
 	local_motion = actor.global_basis.inverse() * Vector3(actor.velocity.x, 0, actor.velocity.z)
 	update_camera(delta)
 
@@ -253,7 +268,18 @@ func ledge_candidate() -> Dictionary:
 	if not profile_clear(Posture.STANDING, goal) or not sweep_clear(actor.global_transform, lifted.origin - origin) \
 			or not sweep_clear(lifted, destination - lifted.origin):
 		return {}
-	return {"lifted": lifted.origin, "destination": destination, "support": top.collider}
+	var edge := Vector3(face.position.x, top.position.y, face.position.z)
+	return {"lifted": lifted.origin, "destination": destination, "support": top.collider,
+		"edge": edge + forward * 0.08, "rise": rise}
+
+func _next_climb_variant() -> int:
+	var count := ClimbVariant.size()
+	# After two repeats, roll only among the other variants.
+	var variant := (_last_variant + climb_random.randi_range(1, count - 1)) % count \
+		if _variant_streak >= 2 else climb_random.randi_range(0, count - 1)
+	_variant_streak = _variant_streak + 1 if variant == _last_variant else 1
+	_last_variant = variant
+	return variant
 
 func try_climb() -> bool:
 	if climbing or posture != Posture.STANDING or not input_active() or actor.placement.is_active():
@@ -265,8 +291,12 @@ func try_climb() -> bool:
 	_support = candidate.support
 	_support_pose = _support.global_transform
 	_climb_path.assign([candidate.lifted, candidate.destination])
-	var distance := actor.global_position.distance_to(_climb_path[0]) + _climb_path[0].distance_to(_climb_path[1])
-	_climb_speed = distance / maxf(tuning.climb_duration, 0.1)
+	_climb_distance = actor.global_position.distance_to(_climb_path[0]) + _climb_path[0].distance_to(_climb_path[1])
+	climb_variant = _next_climb_variant()
+	climb_progress = 0.0
+	climb_edge = candidate.edge
+	climb_rise = candidate.rise
+	_climb_speed = _climb_distance / tuning.climb_time(climb_variant)
 	last_feedback = ""
 	climbing = true
 	sprinting = false
@@ -275,6 +305,10 @@ func try_climb() -> bool:
 
 func cancel_climb(message := "") -> void:
 	climbing = false
+	climb_variant = -1
+	climb_progress = 0.0
+	climb_edge = Vector3.ZERO
+	climb_rise = 0.0
 	_climb_path.clear()
 	_support = null
 	actor.velocity = Vector3.ZERO
@@ -294,6 +328,8 @@ func advance_climb(delta: float) -> void:
 	if collision != null:
 		cancel_climb("Climb path obstructed.")
 		return
+	# Key the visual pose to progress along the validated path.
+	climb_progress = minf(1.0, climb_progress + motion.length() / _climb_distance)
 	if actor.global_position.distance_to(goal) < 0.001:
 		_climb_path.pop_front()
 		if _climb_path.is_empty():

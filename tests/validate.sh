@@ -34,4 +34,5 @@ run_check --headless --path . --script tests/validate_satchel_corrections.gd
 run_check --headless --path . --script tests/validate_round_stock_bag.gd
 run_check --headless --path . --script tests/validate_bag_opening.gd
 run_check --headless --path . --script tests/validate_locomotion.gd
+run_check --headless --path . --script tests/validate_playtest_corrections.gd
 run_check --headless --path . --quit-after 120

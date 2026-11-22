@@ -1,6 +1,6 @@
 # RD-013 — Expanded Locomotion & Basic Traversal
 
-Otis gains sprinting, jumping, crouching, belly crawling and ordinary ledge traversal. The ICF-01 Wayfarer meshes, proportions, modules, hand chirality, colors and accessory attachments are unchanged. Existing standing-forward gait amplitudes and distance-driven phase remain the reference; the same joints articulate other movement states.
+Otis gains sprinting, jumping, crouching, belly crawling and ordinary ledge traversal. The ICF-01 Wayfarer uses its existing meshes, proportions, modules, hands and colors. The satchel sits closer to the torso, with a strap routed over the left shoulder and across the chest. Existing standing-forward gait amplitudes and distance-driven phase remain the reference; the same joints articulate other movement states.
 
 ## Controls
 
@@ -12,10 +12,13 @@ Otis gains sprinting, jumping, crouching, belly crawling and ordinary ledge trav
 | Space, airborne | Catch and climb a reachable ledge; no double jump |
 | Tap Alt | Stand ↔ crouch; crawl → crouch |
 | Hold Alt for 0.4 s | Enter belly crawl; release does not also toggle crouch |
-| K, development build | Existing front/rear character inspection |
+| C | Switch between first person and the right-shoulder gameplay view |
+| K | Enter screenshot orbit or return to the previous gameplay camera |
+| Hold Q/E, orbit only | Rotate the screenshot camera left/right |
+| Horizontal wheel tilt, orbit only | Rotate the screenshot camera in steps |
 | Escape | Existing cursor/menu/placement behavior |
 
-The named runtime InputMap actions are `locomotion_sprint`, `locomotion_jump` and `locomotion_posture`. Defaults are physical Shift, Space and Alt. They register only if absent, preserving future remapping. No settings UI or stamina is added, and canonical `project.godot` stays unchanged.
+The named runtime InputMap actions are `locomotion_sprint`, `locomotion_jump` and `locomotion_posture`. Defaults are physical Shift, Space and Alt. They register only if absent, preserving future remapping. The camera actions are `camera_gameplay`, `camera_orbit`, `camera_orbit_left` and `camera_orbit_right`. C is ignored during orbit. Q/E take priority over context and socket installation in orbit. Movement, posture, jumping, climbing and vertical wheel controls continue to work.
 
 Sprint requires forward input and standing posture, and is disabled during precision manipulation, ADS and climbing. Prone and supported heavy dragging reject jumps. A crouched jump first requires standing clearance. Menus, inventory, terminals and cursor release clear pending jump/Alt gestures and horizontal movement. Inventory can interrupt a climb; normal gravity resumes from the last valid pose.
 
@@ -36,7 +39,7 @@ Sprint requires forward input and standing posture, and is disabled during preci
 | Eye heights | Standing 1.65 m / crouch 1.25 m / prone 0.35 m |
 | Ledge face reach | 0.85 m |
 | Ledge top rise above current feet | 0.25–1.35 m |
-| Nominal climb duration | 0.85 s |
+| Nominal climb durations | Scramble 0.79 s / Maintenance Hoist 0.85 s / Awkward Recovery 0.82 s |
 
 These are provisional gameplay values. The conservative prone footprint includes the outstretched hands and existing satchel on Otis's back. Entering it requires room in front and behind. Every posture checks the actual candidate shape against world geometry before switching. Feet retain the same character origin. Prone yaw checks bounded intermediate orientations so a long footprint cannot freely rotate through a nearby wall. Camera interpolation includes a world-geometry clamp near low ceilings.
 
@@ -73,6 +76,12 @@ Traversal uses two short collision-checked CharacterBody3D movements: raise clea
 
 The procedural rig preserves the forward walk, reverses stride for backward motion, adds lateral leg articulation, speeds its distance-driven cycle during sprint, and folds existing joints for crouch/crawl/climb. Prone head articulation keeps the optic looking forward. The inventory preview deliberately resets to its neutral equipment mannequin, including its head, while the live actor retains the current posture. No meshes, sockets or materials were redesigned.
 
+## Contact pushing and camera collision
+
+Grounded movement applies a bounded horizontal impulse to a contacted loose body, with one traction budget per physics tick. Rigid-body friction and mass determine how far it moves. Dynamic fastened assemblies have one compounded collision root and contribute their total mass. Anchored or mounted items remain constrained. Stationary, sleeping loose items can move on contact. On slopes and in motion, the outcome depends on the contact direction and available traction.
+
+The shoulder and orbit cameras sweep a small sphere from Otis toward the requested viewpoint. A wall retracts the camera immediately, and the camera eases outward once clear. In a tight space the chassis can briefly hide to keep it out of the near plane. Targeting, precision placement and tool operation still originate at Otis's eye.
+
 ## Compact development fixture
 
 Normal F5 launch still uses the existing Facility. The optional fixture is a separate small primitive floor with three ledges and two low roofs, not a new Facility room or the Engineering Test Hall:
@@ -81,7 +90,17 @@ Normal F5 launch still uses the existing Facility. The optional fixture is a sep
 godot --path . res://scenes/locomotion_validation.tscn
 ```
 
-Use Godot 4.7.2. LowLedge is 0.65 m, StandingLedge 1.3 m, JumpLedge 1.8 m. The crouch roof clears 1.5 m and the crawl roof 0.94 m. K inspection shows the actual joint poses. Escape releases the cursor; left-click recaptures it.
+Use Godot 4.7.2. LowLedge is 0.65 m, StandingLedge 1.3 m, JumpLedge 1.8 m. The crouch roof clears 1.5 m and the crawl roof 0.94 m. C shows the shoulder view. K enters orbit for inspecting the joint poses. Escape releases the cursor; left-click recaptures it.
+
+## Playtest correction captures
+
+Shoulder gameplay and front orbit are shown above the rear standing and crawling views. Captured in the Godot 4.7.2 Compatibility renderer.
+
+![Shoulder, orbit, and satchel alignment](playtest-views.jpg)
+
+![Otis walks a loose service wrench across the Facility floor](contact-push.gif)
+
+![Scramble, Maintenance Hoist, and Awkward Recovery](climb-variants.gif)
 
 ## Verification and independent review
 
@@ -91,7 +110,7 @@ Run the complete verification script with `GODOT_BIN` pointing to Godot 4.7.2:
 GODOT_BIN=/path/to/Godot_v4.7.2-stable_linux.x86_64 bash tests/validate.sh
 ```
 
-The full RD-001–RD-013 suite contains **1,720 checks**, including **89 locomotion checks**. The same locomotion suite runs graphically with the production controller and actual Jolt physics. Final hosted run results are recorded in the draft PR.
+The full RD-001–RD-013 suite includes focused checks for contact pushing, camera routing, climb variants and satchel attachment. Counts and hosted run results are recorded in the draft PR.
 
 Godot's headless DisplayServer cannot retain mouse capture. Only in the headless test, an inherited test driver substitutes that capture gate; the real InputMap, character, shapes, gravity, sweeps and object transfers remain in use. The graphical run exercises the unmodified gameplay class. The test adapter is never installed by gameplay code.
 

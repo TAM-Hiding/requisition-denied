@@ -17,6 +17,7 @@ var tool_aiming := false
 @export var interact_hold_threshold: float = 0.35
 var equipment: EquipmentController
 var locomotion: OtisLocomotion
+var view_camera: OtisViewCamera
 var knowledge := PlayerKnowledge.new()
 var controls_enabled: bool = true
 @onready var placement: PrecisionPlacement = $PrecisionPlacement
@@ -30,6 +31,9 @@ func _ready() -> void:
 	locomotion = OtisLocomotion.new()
 	locomotion.name = "Locomotion"
 	add_child(locomotion)
+	view_camera = OtisViewCamera.new()
+	view_camera.name = "ExternalCamera"
+	add_child(view_camera)
 
 func supporting_load_kg() -> float:
 	return body_mass_kg + carrying_loads().total
@@ -43,6 +47,9 @@ func carrying_loads() -> Dictionary:
 		"dragged": 0.0, "total": stored + equipped + external}
 
 func _unhandled_input(event: InputEvent) -> void:
+	if view_camera.route(event):
+		get_viewport().set_input_as_handled()
+		return
 	locomotion.handle_input(event)
 	if event is InputEventMouseMotion and controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if placement.is_active() and placement.rotating:
@@ -71,6 +78,7 @@ func _physics_process(delta: float) -> void:
 		set_tool_aiming(false)
 	camera.fov = move_toward(camera.fov, tool_aim_fov if tool_aiming else camera_fov, delta * 100.0)
 	locomotion.tick(delta)
+	view_camera.tick(delta)
 
 func target_hit() -> Dictionary:
 	var query := PhysicsRayQueryParameters3D.create(camera.global_position,

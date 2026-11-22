@@ -155,10 +155,14 @@ func _physics_process(delta: float) -> void:
 			help.text += "  •  1 Stow  •  X Drop Tool" if tool != null else "  •  1 Equip Tool"
 		if not otis.placement.is_supported_grab():
 			help.text += "  •  Hold Middle Mouse Rotate"
+	elif otis.view_camera.orbiting:
+		help.text = "Q/E or wheel tilt Orbit  •  K Return to gameplay camera"
 	elif tool != null:
 		help.text = "Hold G Grab  •  1 Stow  •  X Drop Tool  •  E Context  •  F3 Debug"
 	else:
 		help.text = "WASD Move / Shift+W Sprint / Space Jump-Climb / Alt Crouch-Hold Crawl  •  E Context  •  Hold E Stow  •  1 Equip  •  G Drop / hold to place or grab  •  Esc Cursor  •  F3 Debug  •  Terminal Settings"
+	if not placing and not otis.view_camera.orbiting:
+		help.text += "  •  C Camera  •  K Orbit"
 	status.visible = feedback_time > 0 or tool != null or not placing or not otis.placement.valid or socket != null
 	advance_hold(delta)
 	if gameplay_input_allowed():
@@ -182,7 +186,8 @@ func _physics_process(delta: float) -> void:
 		target = hit.collider
 		target_distance = otis.camera.global_position.distance_to(hit.position)
 	crosshair.visible = not menu_open and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
-		and not otis.equipment.presentation.sight_replaces_crosshair()
+		and not otis.view_camera.orbiting \
+		and (otis.view_camera.third_person or not otis.equipment.presentation.sight_replaces_crosshair())
 	crosshair.modulate = Color("a2e7df") if target != null else Color.WHITE
 	if menu_open:
 		prompt.text = ""
@@ -194,12 +199,13 @@ func _physics_process(delta: float) -> void:
 		prompt.text = "SEATING  •  Esc Cancel"
 	elif socket != null:
 		mount_issue = otis.placement.installation_feedback(socket)
-		prompt.text = "[E] Install  •  %s" % otis.placement.installation_name() if mount_issue.is_empty() else mount_issue
+		prompt.text = ("K Exit orbit to install" if otis.view_camera.orbiting
+			else "[E] Install  •  %s" % otis.placement.installation_name()) if mount_issue.is_empty() else mount_issue
 	elif placing:
 		var placement := otis.placement
 		prompt.text = "%s  |  %s" % [
 			"ROTATING" if placement.rotating else "PLACEMENT", "CLEAR" if placement.valid else "BLOCKED"]
-	elif target != null:
+	elif target != null and not otis.view_camera.orbiting:
 		prompt.text = "[E]  " + target.definition.display_name
 	else:
 		prompt.text = ""
@@ -273,6 +279,10 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 		terminal.route(event)
+		get_viewport().set_input_as_handled()
+		return
+	if not menu_open and otis.view_camera.route(event):
+		cancel_hold()
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey and event.echo:

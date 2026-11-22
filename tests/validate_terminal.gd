@@ -117,10 +117,17 @@ func run() -> void:
 	world_ui._input(action(&"ui_cancel", true))
 	check(not terminal.active and actor.camera.current and actor.controls_enabled and world_ui.hud.visible, "Escape returns camera and controls")
 	check(not graphical or Input.mouse_mode == Input.MOUSE_MODE_CAPTURED, "Escape restores mouse capture")
+	actor.view_camera.third_person = true
+	actor.view_camera.restore_view()
+	await frames(2)
 	check(actor.equipment.stow().ok and terminal.enter(), "Stowing works again after exit")
 	check(screen.detail.text.contains("EQUIPPED\nNone") and screen.detail.text.contains(wrench.definition.display_name),
 		"Reopened inventory reflects stored wrench")
 	terminal.leave()
+	check(actor.view_camera.is_current() and actor.view_camera.third_person,
+		"Closing a terminal restores the selected shoulder view")
+	actor.view_camera.third_person = false
+	actor.view_camera.restore_view()
 	check(actor.equipment.equip_first().ok and actor.equipment.drop().ok and terminal.enter(),
 		"Retrieving and dropping still work")
 	check(not screen.detail.text.contains(wrench.definition.display_name), "Dropped wrench is absent")

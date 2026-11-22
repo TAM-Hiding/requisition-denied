@@ -61,7 +61,7 @@ func _input(event: InputEvent) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _process(_delta: float) -> void:
-	status.text = "RD-013 / COMPACT LOCOMOTION VALIDATION\nWASD · Shift+W sprint · Space jump/climb · Alt tap crouch / hold crawl · K inspect · Esc cursor\n%s · sprint %s · climb %s · speed %.2f m/s · load %.0f%%\n%s" % [
+	status.text = "RD-013 / COMPACT LOCOMOTION VALIDATION\nWASD · Shift+W sprint · Space jump/climb · Alt tap crouch / hold crawl · C shoulder · K orbit (Q/E) · Esc cursor\n%s · sprint %s · climb %s · speed %.2f m/s · load %.0f%%\n%s" % [
 		OtisLocomotion.Posture.keys()[actor.locomotion.posture], actor.locomotion.sprinting,
 		actor.locomotion.climbing, actor.velocity.length(), actor.locomotion.load_modifiers.ratio * 100,
 		actor.locomotion.last_feedback]
