@@ -284,15 +284,15 @@ func _input(event: InputEvent) -> void:
 		if layout_editor.route(event):
 			get_viewport().set_input_as_handled()
 		return
-	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_L \
-			and not menu_open and active_station() == null and otis.controls_enabled \
+	if layout_editor.has_development_access() and event is InputEventKey and event.pressed and not event.echo \
+			and event.physical_keycode == KEY_L and not menu_open and active_station() == null and otis.controls_enabled \
 			and not otis.locomotion.climbing and not otis.placement.is_active():
 		if layout_editor.can_enter():
 			suspend_tool_input()
 			cancel_hold()
 			layout_editor.enter()
 		else:
-			show_feedback("Layout mode is available on the Engineering Test Hall floor.")
+			show_feedback("Layout mode is available on the hall floor or mezzanine.")
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("inventory_toggle") and active_station() == null and not menu_open:

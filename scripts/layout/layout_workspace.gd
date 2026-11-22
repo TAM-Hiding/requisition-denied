@@ -1,9 +1,17 @@
 class_name LayoutWorkspace
 extends Node3D
-## Ground-floor planning records live in hall-local coordinates.
+## Placement records use hall-local coordinates on marked horizontal supports.
 const CONTACT_GAP := 0.006
+const SUPPORT_EPSILON := 0.0001
+const SUPPORT_NORMAL_MIN := 0.999
+const SUPPORT_PROBE := 0.04
+const SUPPORT_META := &"layout_support"
 const ENTRY_CENTER := Vector2(0.0, 1.0)
 const ENTRY_HALF_SIZE := Vector2(1.05, 1.0)
+const STORAGE_APPROACHES := [
+	[Vector2(-8.40, 2.75), Vector2(0.72, 0.60)],
+	[Vector2(7.0, 23.65), Vector2(0.60, 0.72)],
+]
 
 var hall: Node3D
 var actor: OtisController
@@ -62,8 +70,12 @@ func remove(id: String) -> void:
 
 func replace_all(incoming: Array[Dictionary]) -> String:
 	var accepted: Array[Dictionary] = []
+	var ids := {}
 	var exclude := excluded_bodies()
 	for candidate in incoming:
+		if ids.has(candidate.id):
+			return "Duplicate equipment ID: %s." % candidate.id
+		ids[candidate.id] = true
 		var issue := validate_placement(candidate, accepted, exclude)
 		if not issue.is_empty():
 			return "%s: %s" % [candidate.name, issue]
@@ -97,47 +109,99 @@ func validate_placement(candidate: Dictionary, peers: Array[Dictionary], exclude
 	var yaw: float = candidate.yaw
 	var spec := LayoutCatalog.definition(candidate.type)
 	if spec.is_empty() or not size.is_finite() or not center.is_finite() or not is_finite(yaw) \
-			or center.y != 0.0 or minf(size.x, minf(size.y, size.z)) < 0.1 \
+			or center.y < 0.0 or minf(size.x, minf(size.y, size.z)) < 0.1 \
 			or maxf(size.x, maxf(size.y, size.z)) > 40.0:
-		return "Use finite dimensions from 0.10 to 40.00 m on the hall floor."
+		return "Use finite dimensions from 0.10 to 40.00 m and a valid elevation."
 	var basis := Basis(Vector3.UP, yaw)
-	var footprint := Vector2(size.x, size.z) * 0.5
-	var at := Vector2(center.x, center.z)
+	var occupied := occupied_box(candidate.type, size)
+	var occupied_center := center + basis * occupied.get_center()
+	var occupied_at := Vector2(occupied_center.x, occupied_center.z)
+	var occupied_half := Vector2(occupied.size.x, occupied.size.z) * 0.5
 	var axes := ground_axes(basis)
-	var extents := axes[0].abs() * footprint.x + axes[1].abs() * footprint.y
+	var extents := axes[0].abs() * occupied_half.x + axes[1].abs() * occupied_half.y
 	var half_width: float = hall.get("width") * 0.5
 	var depth: float = hall.get("depth")
-	if absf(at.x) + extents.x > half_width or at.y - extents.y < 0 or at.y + extents.y > depth:
+	if absf(occupied_at.x) + extents.x > half_width or occupied_at.y - extents.y < 0 or occupied_at.y + extents.y > depth:
 		return "Footprint extends outside the hall."
+	# Rack records retain the planning envelope. Only the physical footprint
+	# needs support, so an inward-facing frame can sit against the wall.
+	var support_center := Vector3(occupied_center.x, center.y, occupied_center.z)
+	if not _footprint_supported(support_center, basis, occupied.size, exclude):
+		return "Place the entire footprint on the hall floor or mezzanine."
 	# Planning markers may overlap the future rooms, equipment and shell.
 	if spec.marker:
 		return ""
-	if overlaps(at, footprint, axes, ENTRY_CENTER, ENTRY_HALF_SIZE, [Vector2.RIGHT, Vector2.DOWN]):
+
+	var on_slab := center.y <= SUPPORT_EPSILON
+	if on_slab and overlaps(occupied_at, occupied_half, axes, ENTRY_CENTER, ENTRY_HALF_SIZE, [Vector2.RIGHT, Vector2.DOWN]):
 		return "Keep the personnel threshold clear."
+	if on_slab:
+		for approach: Array in STORAGE_APPROACHES:
+			if overlaps(occupied_at, occupied_half, axes, approach[0], approach[1], [Vector2.RIGHT, Vector2.DOWN]):
+				return "Keep the storage-cell doorway clear."
 	var stair_top: float = depth - float(hall.get("deck_depth"))
 	var stair_start: float = stair_top - float(hall.get("stair_run"))
 	var stair_x: float = half_width - float(hall.get("stair_center_inset"))
-	if overlaps(at, footprint, axes, Vector2(stair_x, stair_start - 0.55), Vector2(0.93, 0.55),
+	var landing := stair_start - 0.55 if on_slab else stair_top + 0.55
+	if overlaps(occupied_at, occupied_half, axes, Vector2(stair_x, landing), Vector2(0.93, 0.55),
 			[Vector2.RIGHT, Vector2.DOWN]):
-		return "Keep the foot of the stair clear."
+		return "Keep the stair landing clear."
+
+	var low := center.y + occupied.position.y
+	var high := low + occupied.size.y
 	for peer in peers:
 		if peer.id == candidate.id or LayoutCatalog.definition(peer.type).marker:
 			continue
-		var peer_size: Vector3 = peer.size
 		var peer_position: Vector3 = peer.position
-		if overlaps(at, footprint, axes, Vector2(peer_position.x, peer_position.z),
-				Vector2(peer_size.x, peer_size.z) * 0.5, ground_axes(Basis(Vector3.UP, peer.yaw))):
+		var peer_box := occupied_box(peer.type, peer.size)
+		var peer_low := peer_position.y + peer_box.position.y
+		if minf(high, peer_low + peer_box.size.y) <= maxf(low, peer_low) + CONTACT_GAP:
+			continue
+		var peer_basis := Basis(Vector3.UP, peer.yaw)
+		var peer_center := peer_position + peer_basis * peer_box.get_center()
+		if overlaps(occupied_at, occupied_half, axes, Vector2(peer_center.x, peer_center.z),
+				Vector2(peer_box.size.x, peer_box.size.z) * 0.5, ground_axes(peer_basis)):
 			return "Footprint overlaps %s." % peer.name
 	var shape := BoxShape3D.new()
-	shape.size = size - Vector3.ONE * 2.0 * CONTACT_GAP
+	shape.size = occupied.size - Vector3.ONE * 2.0 * CONTACT_GAP
 	var query := PhysicsShapeQueryParameters3D.new()
 	query.shape = shape
-	query.transform = hall.global_transform * Transform3D(basis, center + Vector3.UP * size.y / 2)
+	query.transform = hall.global_transform * Transform3D(basis, occupied_center)
 	query.collision_mask = 1 | 2 | 16
 	query.exclude = exclude
 	if not get_world_3d().direct_space_state.intersect_shape(query, 1).is_empty():
 		return "Blocked by the hall, Otis, or a world object."
 	return ""
+
+static func occupied_box(type: String, dimensions: Vector3) -> AABB:
+	var normalized := LayoutCatalog.occupied_box(type)
+	return AABB(normalized.position * dimensions, normalized.size * dimensions)
+
+func has_support_near(point: Vector3) -> bool:
+	return _valid_support(_sample_support(point, 0.15, []))
+
+func _footprint_supported(center: Vector3, basis: Basis, dimensions: Vector3, exclude: Array[RID]) -> bool:
+	var support := _sample_support(center, SUPPORT_PROBE, exclude)
+	if not _valid_support(support) or absf(hall.to_local(support.position).y - center.y) > SUPPORT_EPSILON:
+		return false
+	for corner: Vector3 in [Vector3(-1, 0, -1), Vector3(-1, 0, 1), Vector3(1, 0, -1), Vector3(1, 0, 1)]:
+		var point := center + basis * (dimensions * corner * 0.5)
+		var sample := _sample_support(point, SUPPORT_PROBE, exclude)
+		# Slab and deck are continuous convex boxes. All four corners on one
+		# support guarantee the oriented rectangle is fully supported.
+		if not _valid_support(sample) or sample.collider != support.collider \
+				or absf(hall.to_local(sample.position).y - center.y) > SUPPORT_EPSILON:
+			return false
+	return true
+
+func _sample_support(point: Vector3, distance: float, exclude: Array[RID]) -> Dictionary:
+	var ray := PhysicsRayQueryParameters3D.create(hall.to_global(point + Vector3.UP * distance),
+		hall.to_global(point - Vector3.UP * distance), 1 | 16, exclude)
+	return get_world_3d().direct_space_state.intersect_ray(ray)
+
+func _valid_support(hit: Dictionary) -> bool:
+	return not hit.is_empty() and hit.collider is StaticBody3D and hit.collider.get_meta(SUPPORT_META, false) == true \
+		and hall.global_basis.y.normalized().dot(hit.normal) >= SUPPORT_NORMAL_MIN
 
 static func ground_axes(basis: Basis) -> Array[Vector2]:
 	return [Vector2(basis.x.x, basis.x.z), Vector2(basis.z.x, basis.z.z)]
@@ -181,16 +245,16 @@ func cursor_pick(camera: Camera3D) -> String:
 	return picked
 
 func cursor_floor(camera: Camera3D) -> Variant:
-	var eye := hall.to_local(camera.global_position)
-	var direction := hall.global_basis.inverse() * -camera.global_basis.z
-	var floor_distance := -eye.y / direction.y if direction.y < -0.001 else INF
-	if floor_distance < 0.0 or floor_distance > 22.0:
+	var direction := -camera.global_basis.z
+	if hall.global_basis.y.normalized().dot(direction) >= -0.001:
 		return null
-	var point := eye + direction * floor_distance
 	var start := camera.global_position
-	var ray := PhysicsRayQueryParameters3D.create(start, hall.to_global(point + Vector3.UP * 0.015), 1,
-		excluded_bodies())
-	if not get_world_3d().direct_space_state.intersect_ray(ray).is_empty():
+	var ray := PhysicsRayQueryParameters3D.create(start, start + direction * 22.0, 1 | 16, excluded_bodies())
+	var hit := get_world_3d().direct_space_state.intersect_ray(ray)
+	if not _valid_support(hit):
 		return null
-	point.y = 0.0
+	var point := hall.to_local(hit.position)
+	# Remove ray intersection noise from new placements without changing any
+	# saved coordinates on import. The support plane itself is unchanged.
+	point.y = snappedf(point.y, SUPPORT_EPSILON)
 	return point

@@ -39,7 +39,9 @@ static func decode(text: String) -> Dictionary:
 	var json := JSON.new()
 	if json.parse(text) != OK:
 		return _failure("Layout JSON at line %d: %s" % [json.get_error_line() + 1, json.get_error_message()])
-	var data: Variant = json.data
+	return decode_data(json.data)
+
+static func decode_data(data: Variant) -> Dictionary:
 	if not data is Dictionary:
 		return _failure("The layout must be a JSON object.")
 	var version: Variant = data.get("schema_version")
@@ -57,8 +59,8 @@ static func decode(text: String) -> Dictionary:
 		if not _triple(entry.get("position")) or not _triple(entry.get("size")):
 			return _failure("Record %d requires three finite coordinates for position and size." % index)
 		# Reject invalid wire values before Vector3 narrows them to engine precision.
-		if entry.position[1] != 0.0:
-			return _failure("Record %d must be positioned on the hall floor." % index)
+		if entry.position[1] < 0.0:
+			return _failure("Record %d cannot have a negative elevation." % index)
 		for dimension: float in entry.size:
 			if dimension < MIN_SIZE or dimension > MAX_SIZE:
 				return _failure("Record %d dimensions must be between %.1f and %.0f meters." % [index, MIN_SIZE, MAX_SIZE])
@@ -131,10 +133,11 @@ static func _validate_records(records: Array[Dictionary]) -> String:
 		if not _nonempty_text(type) or LayoutCatalog.definition(String(type)).is_empty():
 			return "%s has an unknown catalog type." % label
 		var position: Variant = record.get("position")
-		if not position is Vector3 or not position.is_finite() or position.y != 0.0:
-			return "%s must be positioned on the hall floor with finite coordinates." % label
+		if not position is Vector3 or not position.is_finite() or position.y < 0.0:
+			return "%s requires finite coordinates and nonnegative elevation." % label
 		var size: Variant = record.get("size")
-		if not size is Vector3 or not size.is_finite() or size[size.min_axis_index()] < MIN_SIZE 				or size[size.max_axis_index()] > MAX_SIZE:
+		if not size is Vector3 or not size.is_finite() or size[size.min_axis_index()] < MIN_SIZE \
+				or size[size.max_axis_index()] > MAX_SIZE:
 			return "%s dimensions must be between %.1f and %.0f meters." % [label, MIN_SIZE, MAX_SIZE]
 		var yaw: Variant = record.get("yaw")
 		if not _number(yaw) or absf(yaw) > TAU:

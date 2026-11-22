@@ -68,8 +68,8 @@ func codec_checks() -> void:
 	reject_edit("type", "unknown_fixture", "Unknown catalog types are rejected")
 	reject_edit("name", null, "Missing names are rejected")
 	reject_edit("position", [1, 0, 2, 3], "Coordinates must be exact triples")
-	reject_edit("position", [1, 0.01, 2], "Only the hall floor elevation is accepted")
-	reject_edit("position", [1, 1e-50, 2], "Nonzero elevation cannot round down to a valid floor coordinate")
+	reject_edit("position", [1, -0.01, 2], "Negative positions below the hall datum are rejected")
+	reject_edit("position", [1, -1e-50, 2], "A negative elevation cannot narrow into a valid floor coordinate")
 	reject_edit("position", [1e100, 0, 2], "Coordinate overflow cannot enter the native Vector3")
 	reject_edit("size", [0.09, 2, 1], "Subminimum dimensions are rejected")
 	reject_edit("size", [1, 2, 41], "Oversized dimensions are rejected")
@@ -85,6 +85,11 @@ func codec_checks() -> void:
 	records = sample()
 	records[0].size = Vector3(LayoutStorage.MIN_SIZE, LayoutStorage.MAX_SIZE, 1.0)
 	check(LayoutStorage.decode(LayoutStorage.encode(records)).ok, "Boundary dimensions round-trip without truncation")
+	records[0].position.y = 3.35
+	records[0].yaw = 0.123456789012345
+	var elevated := LayoutStorage.decode(LayoutStorage.encode(records))
+	check(elevated.ok and elevated.records == records,
+		"Schema version one round-trips an elevated base and custom rotation without rounding")
 
 func file_checks() -> void:
 	var directory := "user://rd-layout-test-" + Crypto.new().generate_random_bytes(8).hex_encode()

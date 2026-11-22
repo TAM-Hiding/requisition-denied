@@ -39,4 +39,7 @@ run_check --headless --path . --script tests/validate_prone_equipment.gd
 run_check --headless --path . --script tests/validate_engineering_hall.gd
 run_check --headless --path . --script tests/validate_layout_storage.gd
 run_check --headless --path . --script tests/validate_layout_editor.gd
+run_check --headless --path . --script tests/validate_layout_editor.gd -- --workshop-layout
+run_check --headless --path . --script tests/validate_storage_cells.gd
+run_check --headless --path . --script tests/validate_approved_hall_layout.gd
 run_check --headless --path . --quit-after 120

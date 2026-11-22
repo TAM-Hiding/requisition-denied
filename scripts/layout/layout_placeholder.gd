@@ -15,6 +15,7 @@ const INVALID := Color("#e57562")
 static var _finishes := {}
 
 var _type := ""
+var _integrated_portal := false
 var _base_size := Vector3.ZERO
 var _ghost := false
 var _editing := false
@@ -34,6 +35,7 @@ func configure(record: Dictionary, ghost := false) -> void:
 	position = record.position
 	rotation = Vector3(0, record.yaw, 0)
 	_type = next_type
+	_integrated_portal = LayoutReference.is_integrated_door(record)
 	_base_size = next_size
 	_ghost = ghost
 	if _label == null:
@@ -88,6 +90,7 @@ func update_highlight() -> void:
 	var highlight := INVALID if not _valid else SELECTED
 	var shadows := GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if _ghost else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 	_label.visible = _editing or _ghost
+	_graphics.visible = _editing or _ghost or not _integrated_portal
 	_label.modulate = highlight if (_selected or _ghost) else Color("#dce8e3")
 	_outline.visible = _ghost or (_editing and _selected)
 	for rail: MeshInstance3D in _outline.get_children():
@@ -139,6 +142,10 @@ func build_silhouette() -> void:
 			build_bandsaw()
 		"material_storage_rack":
 			build_rack()
+		"horizontal_stock_rack":
+			build_horizontal_rack()
+		"bandsaw_infeed_stand", "bandsaw_outfeed_support":
+			build_saw_support()
 		"lockers":
 			build_storage(3, true)
 		"storage_cabinet":
@@ -203,16 +210,46 @@ func build_drill_press() -> void:
 	box(Vector3(0.14, 0.045, 0.021), Vector3(0.10, 0.90, -0.47), SAFETY)
 
 func build_bandsaw() -> void:
-	box(Vector3(0.89, 0.062, 0.89), Vector3(0, 0.031, 0), DARK)
-	box(Vector3(0.87, 0.44, 0.72), Vector3(0, 0.26, 0.03), MACHINE)
-	box(Vector3(0.97, 0.09, 0.91), Vector3(0, 0.52, 0.016), STEEL)
-	box(Vector3(0.19, 0.16, 0.26), Vector3(-0.07, 0.64, -0.23), DARK)
-	box(Vector3(0.22, 0.26, 0.41), Vector3(0.32, 0.687, 0.12), MACHINE)
-	var bow := box(Vector3(0.83, 0.182, 0.36), Vector3(-0.025, 0.842, 0.095), MACHINE)
-	bow.rotation.z = -0.13
-	var blade := box(Vector3(0.64, 0.019, 0.025), Vector3(-0.077, 0.743, 0.096), SURFACE)
-	blade.rotation.z = bow.rotation.z
+	box(Vector3(0.89, 0.062, 0.89), Vector3(0, 0.031, 0), DARK, true)
+	box(Vector3(0.87, 0.51, 0.72), Vector3(0, 0.285, 0), MACHINE, true)
+	var bed := LayoutCatalog.SAW_BED_TOP
+	box(Vector3(0.94, 0.08, 0.98), Vector3(0, bed - 0.04, 0), STEEL, true)
+	for z in [-0.39, 0.39]:
+		box(Vector3(0.43, 0.02, 0.17), Vector3(0, bed - 0.01, z), SURFACE, true)
+	box(Vector3(0.13, 0.15, 0.30), Vector3(-0.16, bed + 0.075, -0.14), DARK, true)
+	box(Vector3(0.22, 0.24, 0.50), Vector3(0.32, 0.72, 0.06), MACHINE, true)
+	var bow := box(Vector3(0.83, 0.182, 0.30), Vector3(-0.025, 0.864, 0.09), MACHINE, true)
+	bow.rotation.z = -0.10
 	box(Vector3(0.17, 0.075, 0.20), Vector3(-0.38, 0.924, 0.10), SAFETY)
+
+func build_horizontal_rack() -> void:
+	for z in [-0.41, 0.0, 0.41]:
+		box(Vector3(0.042, 0.92, 0.06), Vector3(-0.444, 0.46, z), DARK, true)
+		box(Vector3(0.245, 0.033, 0.06), Vector3(-0.3425, 0.0165, z), STEEL, true)
+		for tier in [0.26, 0.51, 0.76]:
+			box(Vector3(0.245, 0.035, 0.046), Vector3(-0.3425, tier, z), STEEL, true)
+			box(Vector3(0.022, 0.058, 0.046), Vector3(-0.231, tier + 0.031, z), DARK, true)
+	for tier in [0.13, 0.88]:
+		box(Vector3(0.035, 0.043, 0.88), Vector3(-0.447, tier, 0), DARK, true)
+
+func build_saw_support() -> void:
+	for z in [-0.37, 0.37]:
+		box(Vector3(0.98, 0.06, 0.12), Vector3(0, 0.03, z), DARK, true)
+		for x in [-0.36, 0.36]:
+			box(Vector3(0.10, 0.82, 0.085), Vector3(x, 0.43, z), STEEL, true)
+	for x in [-0.43, 0.43]:
+		box(Vector3(0.12, 0.08, 0.98), Vector3(x, 0.84, 0), STEEL, true)
+	if _type == "bandsaw_outfeed_support":
+		box(Vector3(0.96, 0.08, 0.97), Vector3(0, 0.96, 0), DARK, true)
+		return
+	# Unit dimensions are scaled with the stand. Separate narrow colliders
+	# match the tops of the stationary rollers for later stock support.
+	for z in [-0.36, -0.12, 0.12, 0.36]:
+		var center := Vector3(0, 0.95, z)
+		cylinder(0.05, 0.72, center, SURFACE, Vector3(0, 0, PI / 2))
+		_collision_boxes.append({"size": Vector3(0.72, 0.10, 0.10), "position": center})
+		box(Vector3(0.06, 0.073, 0.105), Vector3(-0.39, 0.93, z), DARK, true)
+		box(Vector3(0.06, 0.073, 0.105), Vector3(0.39, 0.93, z), DARK, true)
 
 func build_rack() -> void:
 	for x in [-0.475, 0.0, 0.475]:
