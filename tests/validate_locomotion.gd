@@ -335,11 +335,75 @@ func rig_checks() -> void:
 	rig.animate(1, false, false)
 	check(rig.core.position.y < 0.5 and rig.limbs[0].shin.rotation.x < -2,
 		"Mechanical crouch folds the approved existing hip/knee joints")
-	movement.request_posture(OtisLocomotion.Posture.PRONE)
-	rig.animate(1, false, false)
-	check(absf(rig.rotation.x + PI / 2) < 0.01 and rig.limbs[0].shoulder.rotation.x > 2.5,
-		"Prone is a horizontal belly crawl rather than hands-and-knees")
+	prone_rig_checks(rig)
 	await reset()
+
+func prone_rig_checks(rig: WayfarerRig) -> void:
+	var left: Dictionary = rig.limbs[0]
+	var right: Dictionary = rig.limbs[1]
+	var lowest_sole := INF
+	movement.request_posture(OtisLocomotion.Posture.PRONE)
+	for frame in 32:
+		rig.animate(1.0 / 60.0, false, false)
+		for limb in rig.limbs:
+			lowest_sole = minf(lowest_sole, mesh_clearance(limb.foot))
+	check(absf(rig.rotation.x + PI / 2) < 0.12 and left.forearm.rotation.x > 1.7
+		and left.hand.global_position.y < actor.global_position.y + 0.14,
+		"Unequipped prone rests flat on bent forearms")
+	check(lowest_sole > -0.02, "Crouch to prone keeps the visual soles close to or clear of the floor")
+	actor.velocity.z = -actor.movement_speed * movement.tuning.crawl_multiplier
+	rig.gait_phase = 0.0
+	var opposite_pulls := true
+	for frame in 42:
+		rig.animate(1.0 / 60.0, false, false)
+		opposite_pulls = opposite_pulls and absf(left.shoulder.rotation.x + right.shoulder.rotation.x - 1.44) < 0.05
+	check(opposite_pulls and absf(left.shoulder.rotation.x - right.shoulder.rotation.x) > 0.04,
+		"Unequipped crawl alternates short reaches between both forearms")
+
+	var low_shoulders := Vector2(INF, INF)
+	var high_shoulders := Vector2(-INF, -INF)
+	var right_clearance := INF
+	for frame in 96:
+		rig.animate(1.0 / 60.0, true, false)
+		if frame > 30:
+			var shoulders := Vector2(left.shoulder.rotation.x, right.shoulder.rotation.x)
+			low_shoulders = low_shoulders.min(shoulders)
+			high_shoulders = high_shoulders.max(shoulders)
+			right_clearance = minf(right_clearance, mesh_clearance(right.shoulder))
+	var travel := high_shoulders - low_shoulders
+	check(travel.y > 0.05 and travel.y < 0.50 * travel.x and right_clearance > 0.02,
+		"Equipped crawl keeps the right arm clear and active with a reduced stroke")
+	var idle_wrist := actor.to_local(right.hand.global_position)
+	var aim_clearance := INF
+	for frame in 32:
+		actor.equipment.presentation.aim_blend = minf(float(frame) / 8.0, 1.0)
+		rig.animate(1.0 / 60.0, true, false)
+		aim_clearance = minf(aim_clearance, mesh_clearance(right.shoulder))
+	check(right.forearm.rotation.x < 0.45 and actor.to_local(right.hand.global_position).z < idle_wrist.z - 0.30
+		and aim_clearance > -0.025, "Prone aim extends the right arm without a severe floor intersection")
+	for frame in 32:
+		actor.equipment.presentation.aim_blend = maxf(0.0, 1.0 - float(frame) / 8.0)
+		rig.animate(1.0 / 60.0, true, false)
+	check(right.forearm.rotation.x > 1.7 and actor.to_local(right.hand.global_position).distance_to(idle_wrist) < 0.08,
+		"Prone aim release returns the arm to its compact crawl pose")
+
+	actor.velocity = Vector3.ZERO
+	movement.request_posture(OtisLocomotion.Posture.CROUCHING)
+	lowest_sole = INF
+	for frame in 32:
+		rig.animate(1.0 / 60.0, false, false)
+		for limb in rig.limbs:
+			lowest_sole = minf(lowest_sole, mesh_clearance(limb.foot))
+	check(absf(rig.rotation.x) < 0.01 and left.shin.rotation.x < -2 and lowest_sole > -0.025,
+		"Prone to crouch recovers the original pose without severe sole penetration")
+
+func mesh_clearance(joint: Node3D) -> float:
+	var minimum := INF
+	for mesh: MeshInstance3D in joint.find_children("*", "MeshInstance3D", true, false):
+		var bounds := mesh.mesh.get_aabb()
+		for corner in range(8):
+			minimum = minf(minimum, mesh.to_global(bounds.get_endpoint(corner)).y)
+	return minimum - actor.global_position.y
 
 func payload(id: String, mass_kg: float) -> InteractableObject:
 	var item := InteractableObject.new()

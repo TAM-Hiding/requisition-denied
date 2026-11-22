@@ -187,7 +187,14 @@ func _physics_process(delta: float) -> void:
 		target_distance = otis.camera.global_position.distance_to(hit.position)
 	crosshair.visible = not menu_open and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
 		and not otis.view_camera.orbiting \
-		and (otis.view_camera.third_person or not otis.equipment.presentation.sight_replaces_crosshair())
+		and (otis.view_camera.third_person or not otis.equipment.presentation.sight_replaces_crosshair()) \
+		and aim.get("issue") != "TOOL OBSTRUCTED"
+	var active_view := get_viewport().get_camera_3d()
+	var center := get_viewport().get_visible_rect().size * 0.5
+	var aim_point: Variant = aim.get("prone_point")
+	if aim_point is Vector3 and active_view != null and not active_view.is_position_behind(aim_point):
+		center = active_view.unproject_position(aim_point)
+	crosshair.position = center - crosshair.size * 0.5
 	crosshair.modulate = Color("a2e7df") if target != null else Color.WHITE
 	if menu_open:
 		prompt.text = ""

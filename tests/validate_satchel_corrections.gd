@@ -43,6 +43,8 @@ func run() -> void:
 	var tuning: SatchelTuning = satchel.get("tuning")
 	check(satchel.transform.is_equal_approx(tuning.attachment_transform()) and tuning.roll_degrees != 0
 		and tuning.vertical_offset < -0.21, "Messenger attachment uses the saved lower diagonal configuration")
+	check(satchel.position.is_equal_approx(Vector3(0.01, -0.31, 0.112)),
+		"Messenger attachment shifts 7 cm to Otis's left at the same height and depth")
 	check_live_attachment(actor, rig, satchel)
 	var wrench := facility.get_node("Wrench") as InteractableObject
 	var tool: FasteningTool = facility.get("bolt_tool")

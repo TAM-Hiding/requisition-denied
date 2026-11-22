@@ -3,7 +3,7 @@
 [resource]
 script = ExtResource("1")
 vertical_offset = -0.31
-horizontal_offset = 0.08
+horizontal_offset = 0.01
 distance_from_back = 0.112
 pitch_degrees = 4.0
 yaw_degrees = -8.0

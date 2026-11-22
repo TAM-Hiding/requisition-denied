@@ -102,6 +102,22 @@ Shoulder gameplay and front orbit are shown above the rear standing and crawling
 
 ![Scramble, Maintenance Hoist, and Awkward Recovery](climb-variants.gif)
 
+## Final prone playtest corrections
+
+The low crawl alternates short bent-forearm pulls with small leg pushes. With equipment, the left arm provides most of the pull and the right arm uses a shorter support stroke. Aiming extends the right elbow, while the left forearm stays under the torso. Crawl speed, collider, posture clearance and camera height use the same tuning.
+
+While prone, the actual equipped item follows the right-hand grip. The first-person view exposes the equipped arm during aim, and the existing tool remains visible from either camera. The Uni-Bolt aims toward the eye target from its offset position, but the reticle and bolt operation follow the actual barrel. If the tool envelope or barrel is blocked, the pose is hidden and the tool cannot install or remove a fastener.
+
+The satchel moved 70 mm toward Otis’s anatomical left. The strap follows the shell at both ends and stays seated on the chassis. Third-person camera distance and framing are deferred until playtesting in the Engineering Test Hall.
+
+![Unequipped and equipped forearm crawl](final-forearm-crawl.gif)
+
+![Crawl, equipped idle and prone aim poses](final-prone-poses.jpg)
+
+![First-person prone aiming](final-prone-first-person.jpg)
+
+![Satchel through six movement states](final-satchel-poses.jpg)
+
 ## Verification and independent review
 
 Run the complete verification script with `GODOT_BIN` pointing to Godot 4.7.2:
