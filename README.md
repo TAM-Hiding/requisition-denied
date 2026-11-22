@@ -1,5 +1,7 @@
 # Requisition Denied
 
+RD-015A adds the OC-01 bridge crane and handheld remote to the Engineering Test Hall. See the [crane controls and maintenance playtest](docs/crane/README.md).
+
 Linux-first, low-poly immersive systems game built with **Godot 4.7.2 / GDScript**.
 
 RD-014C loads the approved shop layout, adds exterior storage cells, and allows layout editing on the mezzanine.

@@ -51,7 +51,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	locomotion.handle_input(event)
-	if event is InputEventMouseMotion and controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+	if event is InputEventMouseMotion and locomotion.input_active():
 		if placement.is_active() and placement.rotating:
 			placement.rotate_from_mouse(event.relative)
 			get_viewport().set_input_as_handled()

@@ -1,5 +1,6 @@
 extends CanvasLayer
 var service := InteractionService.new()
+var crane_control := CraneRemoteControls.new()
 var inventory: InventoryScreen
 var layout_editor: LayoutEditor
 var hud: Control
@@ -34,6 +35,8 @@ func _ready() -> void:
 	inventory.actor = get_parent().get_node("Otis")
 	add_child(inventory)
 	inventory.opening.connect(cancel_hold)
+	inventory.opening.connect(crane_control.disconnect_remote)
+	otis.equipment.changed.connect(crane_control.check_ownership.bind(otis))
 	layout_editor = LayoutEditor.new()
 	layout_editor.name = "LayoutEditor"
 	layout_editor.configure(get_parent().get_node("EngineeringTestHall"), otis)
@@ -42,7 +45,10 @@ func _ready() -> void:
 	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(hud)
-	layout_editor.active_changed.connect(func(enabled: bool) -> void: hud.visible = not enabled)
+	layout_editor.active_changed.connect(func(enabled: bool) -> void:
+		hud.visible = not enabled
+		if enabled:
+			crane_control.disconnect_remote())
 	var heading := Label.new()
 	heading.text = "REQUISITION DENIED   /   DEVELOPMENT"
 	heading.position = Vector2(24, 18)
@@ -128,6 +134,7 @@ func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _physics_process(delta: float) -> void:
+	crane_control.update(otis, crane_context_ready())
 	if inventory.active or layout_editor.active:
 		return
 	var tool := otis.equipped_tool()
@@ -137,7 +144,13 @@ func _physics_process(delta: float) -> void:
 		return
 	var ram: StructuralTestRam = get_parent().test_ram
 	var aim := {}
-	if tool != null and gameplay_input_allowed():
+	var crane_active := crane_control.active()
+	var pendant := crane_control.held_remote(otis)
+	if crane_active:
+		tool_readout.text = crane_control.status_text()
+	elif pendant != null:
+		tool_readout.text = "OC-01 REMOTE  •  V Connect"
+	elif tool != null and gameplay_input_allowed():
 		aim = tool.aim_feedback(otis.camera, otis)
 		tool_readout.text = tool.hud_text() + "\nLMB Use  •  RMB Aim  •  R Mode  •  V Grade  •  B Refill"
 		var guidance: String = aim.issue
@@ -155,7 +168,11 @@ func _physics_process(delta: float) -> void:
 	var placing := otis.placement.is_active()
 	var socket := otis.placement.installation_candidate()
 	var mount_issue := ""
-	if placing:
+	if crane_active:
+		help.text = "V Disconnect  •  1 Stow  •  X Drop  •  C Camera"
+	elif pendant != null and not otis.view_camera.orbiting:
+		help.text = "V Connect  •  1 Stow  •  X Drop  •  E Context"
+	elif placing:
 		help.text = "Wheel Range  •  G Place  •  Esc Cancel"
 		if otis.placement.is_grabbing():
 			help.text += "  •  1 Stow  •  X Drop Tool" if tool != null else "  •  1 Equip Tool"
@@ -167,7 +184,7 @@ func _physics_process(delta: float) -> void:
 		help.text = "Hold G Grab  •  1 Stow  •  X Drop Tool  •  E Context  •  F3 Debug"
 	else:
 		help.text = "WASD Move / Shift+W Sprint / Space Jump-Climb / Alt Crouch-Hold Crawl  •  E Context  •  Hold E Stow  •  1 Equip  •  G Drop / hold to place or grab  •  Esc Cursor  •  F3 Debug  •  Terminal Settings"
-	if not placing and not otis.view_camera.orbiting:
+	if not crane_active and not placing and not otis.view_camera.orbiting:
 		help.text += "  •  C Camera  •  K Orbit"
 		if layout_editor.can_enter():
 			help.text += "  •  L Layout"
@@ -187,13 +204,13 @@ func _physics_process(delta: float) -> void:
 			close_menu()
 		elif menu_actions != menu_target.query_actions():
 			rebuild_actions()
-	var hit := otis.target_hit()
+	var hit := {} if crane_active else otis.target_hit()
 	target = null
 	target_distance = 0.0
 	if not hit.is_empty() and hit.collider is InteractableObject:
 		target = hit.collider
 		target_distance = otis.camera.global_position.distance_to(hit.position)
-	crosshair.visible = not menu_open and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
+	crosshair.visible = not crane_active and not menu_open and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED \
 		and not otis.view_camera.orbiting \
 		and (otis.view_camera.third_person or not otis.equipment.presentation.sight_replaces_crosshair()) \
 		and aim.get("issue") != "TOOL OBSTRUCTED"
@@ -204,7 +221,7 @@ func _physics_process(delta: float) -> void:
 		center = active_view.unproject_position(aim_point)
 	crosshair.position = center - crosshair.size * 0.5
 	crosshair.modulate = Color("a2e7df") if target != null else Color.WHITE
-	if menu_open:
+	if menu_open or crane_active:
 		prompt.text = ""
 	elif Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		prompt.text = "Left-click to resume"
@@ -311,6 +328,14 @@ func _input(event: InputEvent) -> void:
 		terminal.route(event)
 		get_viewport().set_input_as_handled()
 		return
+	if menu_open and menu_target is MaintenanceAccessPoint and event.is_action_pressed("interact"):
+		if menu_actions.has(&"repair"):
+			perform_action(&"repair")
+		get_viewport().set_input_as_handled()
+		return
+	if handle_crane_input(event):
+		get_viewport().set_input_as_handled()
+		return
 	if not menu_open and otis.view_camera.route(event):
 		cancel_hold()
 		get_viewport().set_input_as_handled()
@@ -369,6 +394,49 @@ func _input(event: InputEvent) -> void:
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed and not menu_open:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		get_viewport().set_input_as_handled()
+
+func crane_context_ready() -> bool:
+	return not inventory.active and not layout_editor.active and not otis.view_camera.orbiting \
+		and not otis.placement.is_active() and gameplay_input_allowed()
+
+func handle_crane_input(event: InputEvent) -> bool:
+	crane_control.check_ownership(otis)
+	if not crane_context_ready():
+		crane_control.disconnect_remote()
+		return false
+	var item := crane_control.held_remote(otis)
+	if item == null:
+		return false
+	if event.is_action_pressed(&"crane_toggle") and not event.is_echo():
+		if crane_control.active():
+			crane_control.disconnect_remote()
+		elif crane_control.connect_remote(item, otis):
+			cancel_hold()
+			otis.placement.clear_gesture()
+		else:
+			show_feedback("Enter the Engineering Test Hall to connect to OC-01.")
+		return true
+	if event.is_action_pressed(&"equip_first") and not event.is_echo():
+		cancel_hold()
+		otis.equipment.stow()
+		return true
+	if event.is_action_pressed(&"drop_tool") and not event.is_echo():
+		cancel_hold()
+		otis.equipment.drop()
+		return true
+	if not crane_control.active():
+		return false
+	if not item.in_range(otis):
+		crane_control.disconnect_remote()
+		return false
+	if event.is_action_pressed(&"ui_cancel"):
+		crane_control.disconnect_remote()
+		return true
+	if event.is_action_pressed(&"camera_orbit"):
+		crane_control.disconnect_remote()
+		return false
+	return crane_control.route(event) or event.is_action(&"interact") or event.is_action(&"drop_item") \
+		or event.is_action(&"precision_rotate")
 
 func handle_placement_controls(event: InputEvent) -> bool:
 	if event.is_action("interact") or event.is_action("equip_first"):
@@ -436,6 +504,7 @@ func handle_fastening_input(event: InputEvent) -> bool:
 
 func set_terminal_active(active: bool) -> void:
 	if active:
+		crane_control.disconnect_remote()
 		suspend_tool_input()
 	cancel_hold()
 	otis.set_tool_aiming(false)
@@ -455,7 +524,7 @@ func station_for(object: InteractableObject) -> TerminalInteraction:
 	return null
 
 func gameplay_input_allowed() -> bool:
-	return application_focused and not menu_open and active_station() == null and not otis.locomotion.climbing and otis.controls_enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+	return application_focused and not menu_open and active_station() == null and not otis.locomotion.climbing and otis.locomotion.input_active()
 
 func cancel_hold() -> void:
 	e_pending = false
@@ -491,6 +560,8 @@ func open_menu(object: InteractableObject) -> void:
 	information.text = "Choose an action."
 	rebuild_actions()
 	panel.show()
+	if object is MaintenanceAccessPoint:
+		perform_action(&"inspect")
 
 func rebuild_actions() -> void:
 	menu_actions = menu_target.query_actions()
@@ -501,7 +572,10 @@ func rebuild_actions() -> void:
 		var button := Button.new()
 		button.text = String(action).replace("_", " ").capitalize()
 		var use_terminal: bool = action == &"use_terminal" and station_for(menu_target) != null
-		button.disabled = action not in [&"inspect", &"pick_up", &"move", &"remove", &"store"] and not use_terminal
+		var repair_component: bool = action == &"repair" and menu_target is MaintenanceAccessPoint
+		button.disabled = action not in [&"inspect", &"pick_up", &"move", &"remove", &"store"] and not use_terminal and not repair_component
+		if repair_component:
+			button.text += "  [E]"
 		if button.disabled:
 			button.text += " — unavailable in RD-002"
 		button.pressed.connect(perform_action.bind(action))
@@ -518,6 +592,8 @@ func perform_action(action: StringName) -> void:
 	var result := service.request(action, otis, otis.camera, menu_target, otis.interaction_distance, otis.knowledge)
 	if result.ok and action != &"inspect":
 		close_menu()
+		if action == &"repair":
+			show_feedback(result.message)
 	elif result.ok:
 		information.text = "%s\n\n%s\n\nRecorded in Otis’s knowledge." % [result.information.name, result.information.description]
 	else:
@@ -534,6 +610,7 @@ func close_menu() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and application_focused:
 		application_focused = false
+		crane_control.disconnect_remote()
 		if is_instance_valid(inventory):
 			inventory.bag.cancel_gestures()
 			inventory.turn_left = false
