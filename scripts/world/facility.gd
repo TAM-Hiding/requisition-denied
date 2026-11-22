@@ -14,6 +14,8 @@ var terminal_session: TerminalInteraction
 var ram_session: TerminalInteraction
 var scrap_session: TerminalInteraction
 var scrap_supply: ScrapSupply
+var overhead_crane: BridgeCrane
+var crane_remote: CraneRemote
 var _barrier_was_blocked := false
 
 
@@ -86,8 +88,39 @@ func _ready() -> void:
 	build_load_station(floor as StaticBody3D, dark, amber, steel)
 	build_fastening_station(crate, dark, amber, steel)
 	build_scrap_rack(dark, amber, steel)
+	install_overhead_crane(dark, amber, steel)
 	if load_approved_layout:
 		install_approved_layout.call_deferred()
+
+func install_overhead_crane(dark: Material, amber: Material, steel: Material) -> void:
+	var hall: Node3D = $EngineeringTestHall
+	overhead_crane = BridgeCrane.new()
+	overhead_crane.name = "OverheadCrane"
+	hall.add_child(overhead_crane)
+	overhead_crane.configure(hall)
+
+	var cradle := Node3D.new()
+	cradle.name = "CraneRemoteCradle"
+	cradle.position = Vector3(-2.25, 0.0, 0.58)
+	hall.add_child(cradle)
+	box(cradle, "Foot", Vector3(0.38, 0.07, 0.34), Vector3.UP * 0.035, dark, true)
+	box(cradle, "Post", Vector3(0.14, 0.92, 0.16), Vector3.UP * 0.49, steel, true)
+	box(cradle, "Tray", Vector3(0.46, 0.08, 0.36), Vector3.UP * 0.985, dark, true)
+	box(cradle, "TrayEdge", Vector3(0.44, 0.031, 0.013), Vector3(0.0, 0.962, 0.182), amber)
+	var plate := Label3D.new()
+	plate.text = "OC-01 / REMOTE"
+	plate.position = Vector3(0, 1.008, 0.191)
+	plate.font_size = 26
+	plate.pixel_size = 0.00115
+	plate.outline_size = 0
+	plate.modulate = Color("e4d3a6")
+	cradle.add_child(plate)
+
+	crane_remote = CraneRemote.new()
+	crane_remote.name = "CraneRemote"
+	crane_remote.crane = overhead_crane
+	crane_remote.position = cradle.position + Vector3.UP * 1.10
+	hall.add_child(crane_remote)
 
 func install_approved_layout() -> void:
 	# Advance physics before validating the authored layout against the shell.

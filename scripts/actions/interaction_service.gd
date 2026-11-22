@@ -19,6 +19,11 @@ func request(action: StringName, actor: Node3D, camera: Camera3D,
 		return {"ok": false, "message": "Object is no longer within reach or sight."}
 	if action != &"move" and not target.query_actions().has(action):
 		return {"ok": false, "message": "Action unavailable."}
+	if action == &"repair" and target is MaintenanceAccessPoint:
+		if knowledge == null or not knowledge.has_inspected(target.definition.object_id):
+			return {"ok": false, "message": "Inspect the component before repair."}
+		var issue: String = target.component.repair()
+		return {"ok": issue.is_empty(), "message": issue if not issue.is_empty() else "%s repaired." % target.definition.display_name}
 	if action == &"remove" and target is MechanicalComponent:
 		if actor is OtisController and actor.placement.is_active():
 			return {"ok": false, "message": "Place or cancel the current object first."}
