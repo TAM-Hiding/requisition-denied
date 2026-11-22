@@ -57,7 +57,10 @@ func tap_key(code: Key) -> void:
 	Input.flush_buffered_events()
 
 func solid_ray(from: Vector3, to: Vector3) -> Dictionary:
-	var query := PhysicsRayQueryParameters3D.create(from, to, otis.collision_mask, [otis.get_rid()])
+	# These rays validate the original shell, independently of the approved furniture.
+	var exclude: Array[RID] = facility.get_node("InteractionUI").layout_editor.workspace.excluded_bodies()
+	exclude.append(otis.get_rid())
+	var query := PhysicsRayQueryParameters3D.create(from, to, otis.collision_mask, exclude)
 	return facility.get_world_3d().direct_space_state.intersect_ray(query)
 
 func hall_point(x: float, y: float, z: float) -> Vector3:

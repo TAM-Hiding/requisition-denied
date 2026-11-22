@@ -7,6 +7,11 @@ const STAIR_WIDTH := 1.8
 const GUARD_HEIGHT := 1.10
 const STAIR_STEPS := 20
 const BAYS := 4
+const STORAGE_DOOR_A := Vector3(-9.0, 0.0, 2.75)
+const STORAGE_DOOR_B := Vector3(7.0, 0.0, 24.25)
+const STORAGE_DOOR_WIDTH := 1.06
+const STORAGE_DOOR_HEIGHT := 2.18
+const STORAGE_CELL_SIZE := Vector3(4.0, 2.80, 5.0)
 
 @export var width := 18.288
 @export var depth := 24.384
@@ -40,10 +45,12 @@ func _ready() -> void:
 	build_mezzanine()
 	build_lighting()
 	build_markings()
+	build_storage_cells()
 
 func build_shell() -> void:
 	# One continuous slab collider shares the chamber's floor datum.
-	box($Shell, "SlabCollider", Vector3(width, 0.30, depth), Vector3(0, -0.15, depth / 2), null, true)
+	var slab := box($Shell, "SlabCollider", Vector3(width, 0.30, depth), Vector3(0, -0.15, depth / 2), null, true)
+	slab.set_meta(&"layout_support", true)
 	for index in BAYS:
 		var bay_depth := depth / BAYS
 		var z := (index + 0.5) * bay_depth
@@ -52,19 +59,32 @@ func build_shell() -> void:
 			box($Shell, "ControlJoint", Vector3(width, 0.012, 0.025), Vector3(0, -0.010, z - bay_depth / 2), shadow_line)
 	for side in [-1.0, 1.0]:
 		var x: float = side * (half_width + WALL_THICKNESS / 2)
-		box($Shell, "SideWall", Vector3(WALL_THICKNESS, ceiling_height, depth), Vector3(x, ceiling_height / 2, depth / 2), wall, true)
-		box($Shell, "ConcreteDado", Vector3(0.025, 1.25, depth),
-			Vector3(side * (half_width - 0.01), 0.625, depth / 2), dado)
+		var dado_x: float = side * (half_width - 0.01)
+		if side < 0.0:
+			build_storage_portal_wall("SideWall", true, x, 0.0, depth, STORAGE_DOOR_A.z)
+			var opening_start := STORAGE_DOOR_A.z - STORAGE_DOOR_WIDTH / 2
+			var opening_end := STORAGE_DOOR_A.z + STORAGE_DOOR_WIDTH / 2
+			box($Shell, "ConcreteDado", Vector3(0.025, 1.25, opening_start),
+				Vector3(dado_x, 0.625, opening_start / 2), dado)
+			box($Shell, "ConcreteDado", Vector3(0.025, 1.25, depth - opening_end),
+				Vector3(dado_x, 0.625, (depth + opening_end) / 2), dado)
+		else:
+			box($Shell, "SideWall", Vector3(WALL_THICKNESS, ceiling_height, depth),
+				Vector3(x, ceiling_height / 2, depth / 2), wall, true)
+			box($Shell, "ConcreteDado", Vector3(0.025, 1.25, depth), Vector3(dado_x, 0.625, depth / 2), dado)
 		for index in range(1, BAYS * 2):
 			# Thin formwork joints remain visual so the collision wall stays planar.
 			var seam_z := depth * index / (BAYS * 2)
-			box($Shell, "WallFormJoint", Vector3(0.008, ceiling_height - 1.26, 0.023),
-				Vector3(side * (half_width - 0.006), (ceiling_height + 1.26) / 2, seam_z), shadow_line)
+			var seam_bottom := 1.26
+			if side < 0.0 and absf(seam_z - STORAGE_DOOR_A.z) < STORAGE_DOOR_WIDTH / 2 + 0.012:
+				seam_bottom = STORAGE_DOOR_HEIGHT
+			box($Shell, "WallFormJoint", Vector3(0.008, ceiling_height - seam_bottom, 0.023),
+				Vector3(side * (half_width - 0.006), (ceiling_height + seam_bottom) / 2, seam_z), shadow_line)
 		var wing := half_width - CHAMBER_HALF_WIDTH + WALL_THICKNESS
 		box($Shell, "EntranceWing", Vector3(wing, ceiling_height, WALL_THICKNESS),
 			Vector3(side * (CHAMBER_HALF_WIDTH + wing / 2), ceiling_height / 2, -WALL_THICKNESS / 2), wall, true)
-	box($Shell, "RearWall", Vector3(width + 2 * WALL_THICKNESS, ceiling_height, WALL_THICKNESS),
-		Vector3(0, ceiling_height / 2, depth + WALL_THICKNESS / 2), wall, true)
+	build_storage_portal_wall("RearWall", false, depth + WALL_THICKNESS / 2,
+		-half_width - WALL_THICKNESS, half_width + WALL_THICKNESS, STORAGE_DOOR_B.x)
 	var upper_bottom := CHAMBER_WALL_HEIGHT - 0.03
 	var upper := ceiling_height - upper_bottom
 	# Stand off the chamber roof face so its upper slab cannot z-fight with the wall.
@@ -72,6 +92,70 @@ func build_shell() -> void:
 		Vector3(0, upper_bottom + upper / 2, 0.02 - WALL_THICKNESS / 2), wall, true)
 	box($Shell, "RoofDeck", Vector3(width + 2 * WALL_THICKNESS, 0.30, depth),
 		Vector3(0, ceiling_height + 0.15, depth / 2), roof, true)
+
+func build_storage_portal_wall(title: String, along_z: bool, plane: float,
+		start: float, end: float, door: float) -> void:
+	var opening_start := door - STORAGE_DOOR_WIDTH / 2
+	var opening_end := door + STORAGE_DOOR_WIDTH / 2
+	wall_piece(title, along_z, plane, start, opening_start, 0.0)
+	wall_piece(title + "Far", along_z, plane, opening_end, end, 0.0)
+	wall_piece(title + "Header", along_z, plane, opening_start, opening_end, STORAGE_DOOR_HEIGHT)
+
+func wall_piece(title: String, along_z: bool, plane: float, start: float, end: float, base: float) -> void:
+	var length := end - start
+	var height := ceiling_height - base
+	var middle := (start + end) / 2
+	var y := (base + ceiling_height) / 2
+	var size := Vector3(WALL_THICKNESS, height, length) if along_z else Vector3(length, height, WALL_THICKNESS)
+	var at := Vector3(plane, y, middle) if along_z else Vector3(middle, y, plane)
+	box($Shell, title, size, at, wall, true)
+
+func build_storage_cells() -> void:
+	var cells := Node3D.new()
+	cells.name = "StorageCells"
+	add_child(cells)
+	build_storage_cell(cells, "A", STORAGE_DOOR_A, -PI / 2, half_width + STORAGE_DOOR_A.x, STORAGE_CELL_SIZE)
+	build_storage_cell(cells, "B", STORAGE_DOOR_B, 0.0, depth - STORAGE_DOOR_B.z, STORAGE_CELL_SIZE)
+
+func build_storage_cell(parent: Node3D, letter: String, door: Vector3, yaw: float,
+		inside_face: float, clear_size: Vector3) -> void:
+	var cell := Node3D.new()
+	cell.name = "StorageCell" + letter
+	cell.position = door
+	cell.rotation.y = yaw
+	parent.add_child(cell)
+	# The cell's +Z axis points away from the hall. The existing wall forms
+	# its front; its floor starts at the hall slab edge, through the opening.
+	var outside_face := inside_face + WALL_THICKNESS
+	var outside_back := outside_face + clear_size.z + WALL_THICKNESS
+	var outside_width := clear_size.x + WALL_THICKNESS * 2
+	box(cell, "CellFloor", Vector3(outside_width, 0.30, outside_back - inside_face),
+		Vector3(0, -0.15, (inside_face + outside_back) / 2), concrete, true)
+	for side: float in [-1.0, 1.0]:
+		var x := side * (clear_size.x + WALL_THICKNESS) / 2
+		box(cell, "CellSideWall", Vector3(WALL_THICKNESS, clear_size.y, clear_size.z),
+			Vector3(x, clear_size.y / 2, outside_face + clear_size.z / 2), wall, true)
+	box(cell, "CellBackWall", Vector3(outside_width, clear_size.y, WALL_THICKNESS),
+		Vector3(0, clear_size.y / 2, outside_back - WALL_THICKNESS / 2), wall, true)
+	box(cell, "CellCeiling", Vector3(outside_width, 0.22, outside_back - outside_face),
+		Vector3(0, clear_size.y + 0.11, (outside_face + outside_back) / 2), roof, true)
+	var trim := 0.07
+	var trim_reveal := 0.008
+	var jamb_height := STORAGE_DOOR_HEIGHT - trim_reveal
+	var opening_center := (inside_face + outside_face) / 2
+	var trim_depth := WALL_THICKNESS + 0.035
+	for side: float in [-1.0, 1.0]:
+		box(cell, "DoorJamb", Vector3(trim, jamb_height, trim_depth),
+			Vector3(side * ((STORAGE_DOOR_WIDTH + trim) / 2 - trim_reveal), jamb_height / 2, opening_center), steel)
+	box(cell, "DoorHead", Vector3(STORAGE_DOOR_WIDTH + trim * 2, trim, trim_depth),
+		Vector3(0, jamb_height + trim / 2, opening_center), steel)
+	box(cell, "ThresholdPaint", Vector3(STORAGE_DOOR_WIDTH, 0.004, WALL_THICKNESS),
+		Vector3(0, 0.002, opening_center), amber)
+	var sign_at := door + Basis(Vector3.UP, yaw) * Vector3(0, STORAGE_DOOR_HEIGHT + 0.20, inside_face - 0.027)
+	placard("StorageCell" + letter + "Sign", "STORAGE   /   " + letter, sign_at, yaw + PI, 1.0)
+	for fraction in [0.27, 0.70]:
+		light_fixture(Vector3(0, clear_size.y - 0.11, outside_face + clear_size.z * fraction),
+			Vector2(1.26, 0.22), 6.2, 1.65, false, cell)
 
 func build_steelwork() -> void:
 	# Five portal frames, with wall-side runway girders and secondary roof purlins.
@@ -104,8 +188,9 @@ func build_steelwork() -> void:
 
 func build_mezzanine() -> void:
 	var deck_width := width
-	box($Mezzanine, "Deck", Vector3(deck_width, 0.22, deck_depth),
+	var deck := box($Mezzanine, "Deck", Vector3(deck_width, 0.22, deck_depth),
 		Vector3(0, deck_height - 0.11, deck_front + deck_depth / 2), dado, true)
+	deck.set_meta(&"layout_support", true)
 	ibeam($Mezzanine, "DeckFrontBeam", Vector3(-half_width, deck_height - 0.36, deck_front + 0.22),
 		Vector3(half_width, deck_height - 0.36, deck_front + 0.22), 0.34, 0.27)
 	for index in range(1, 12):
@@ -199,9 +284,11 @@ func build_lighting() -> void:
 		lamp.light_color = Color("d2d5c4")
 		$Lighting.add_child(lamp)
 
-func light_fixture(at: Vector3, footprint: Vector2, reach: float, energy: float, casts_shadows := false) -> void:
-	box($Lighting, "FixtureHousing", Vector3(footprint.x, 0.15, footprint.y), at, steel)
-	box($Lighting, "FixtureLens", Vector3(footprint.x * 0.89, 0.034, footprint.y * 0.78),
+func light_fixture(at: Vector3, footprint: Vector2, reach: float, energy: float, casts_shadows := false,
+		parent: Node3D = null) -> void:
+	var group := parent if parent != null else $Lighting
+	box(group, "FixtureHousing", Vector3(footprint.x, 0.15, footprint.y), at, steel)
+	box(group, "FixtureLens", Vector3(footprint.x * 0.89, 0.034, footprint.y * 0.78),
 		at - Vector3.UP * 0.092, fixture)
 	var lamp := SpotLight3D.new()
 	lamp.name = "WorkLight"
@@ -214,7 +301,7 @@ func light_fixture(at: Vector3, footprint: Vector2, reach: float, energy: float,
 	lamp.light_energy = energy
 	lamp.shadow_enabled = casts_shadows
 	lamp.light_color = Color("e0e4d7")
-	$Lighting.add_child(lamp)
+	group.add_child(lamp)
 
 func build_markings() -> void:
 	# Low curb marks the perimeter of a former utility footing. It is genuine

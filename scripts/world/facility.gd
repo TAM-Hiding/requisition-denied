@@ -19,6 +19,7 @@ var _barrier_was_blocked := false
 
 ## A null seed uses new manufacturing variance on every Facility instance.
 var chassis_seed: Variant = null
+@export var load_approved_layout := true
 
 func _ready() -> void:
 	$Otis.chassis = AndroidChassis.generate(randi() if chassis_seed == null else int(chassis_seed))
@@ -85,6 +86,19 @@ func _ready() -> void:
 	build_load_station(floor as StaticBody3D, dark, amber, steel)
 	build_fastening_station(crate, dark, amber, steel)
 	build_scrap_rack(dark, amber, steel)
+	if load_approved_layout:
+		install_approved_layout.call_deferred()
+
+func install_approved_layout() -> void:
+	# Advance physics before validating the authored layout against the shell.
+	await get_tree().physics_frame
+	var approved := LayoutReference.approved()
+	if not approved.ok:
+		push_error(approved.error)
+		return
+	var issue: String = $InteractionUI.layout_editor.workspace.replace_all(approved.records)
+	if not issue.is_empty():
+		push_error("Approved Engineering Test Hall layout: " + issue)
 
 func build_hall_opening(wall_mat: Material, frame: Material) -> void:
 	const CLEAR_HALF_WIDTH := 0.90

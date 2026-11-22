@@ -2,6 +2,9 @@ class_name LayoutEditor
 extends Control
 signal active_changed(enabled: bool)
 ## Administrative input owner. Otis keeps normal movement while the cursor is captured.
+const WORKSHOP_ARGUMENT := "--workshop-layout"
+
+var _development_access := OS.is_debug_build() and OS.get_cmdline_user_args().has(WORKSHOP_ARGUMENT)
 var actor: OtisController
 var workspace: LayoutWorkspace
 var active := false
@@ -33,6 +36,10 @@ func configure(hall: Node3D, otis: OtisController) -> void:
 	hall.add_child(workspace)
 
 func _ready() -> void:
+	hide()
+	if not _development_access:
+		set_physics_process(false)
+		return
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var guide := Label.new()
@@ -60,7 +67,6 @@ func _ready() -> void:
 		label.add_theme_color_override("font_outline_color", Color("102124"))
 		label.add_theme_constant_override("outline_size", 4)
 	build_panel()
-	hide()
 
 func build_panel() -> void:
 	panel = PanelContainer.new()
@@ -167,12 +173,22 @@ func spinner(parent: Container, low: float, high: float, step: float, initial: f
 	parent.add_child(widget)
 	return widget
 
+func has_development_access() -> bool:
+	return _development_access
+
 func can_enter() -> bool:
+	if not _development_access or not actor.controls_enabled or actor.locomotion.climbing or actor.placement.is_active():
+		return false
 	var point := workspace.hall.to_local(actor.global_position)
+	return _within_hall_footprint(point) and workspace.has_support_near(point)
+
+func _within_hall_footprint(point: Vector3) -> bool:
 	return absf(point.x) < float(workspace.hall.get("width")) / 2 and point.z >= 0.0 \
-		and point.z < float(workspace.hall.get("depth")) and absf(point.y) < 0.15
+		and point.z < float(workspace.hall.get("depth"))
 
 func enter() -> void:
+	if active or not can_enter():
+		return
 	active = true
 	_previous_mouse_mode = Input.mouse_mode
 	_previous_placement_suspension = actor.placement.input_suspended
@@ -186,6 +202,9 @@ func enter() -> void:
 	active_changed.emit(true)
 
 func leave() -> void:
+	if not active:
+		return
+	dialog.hide()
 	cancel_preview()
 	workspace.set_editing(false)
 	actor.locomotion.cancel_input()
@@ -203,7 +222,7 @@ func show_panel(enabled: bool) -> void:
 		refresh_list()
 
 func route(event: InputEvent) -> bool:
-	if dialog.visible:
+	if not active or dialog.visible:
 		return false
 	if event is InputEventKey and event.pressed and not event.echo:
 		var key: Key = event.physical_keycode if event.physical_keycode != KEY_NONE else event.keycode
@@ -253,7 +272,12 @@ func walk_shortcut(key: Key, fine: bool, fine_rotation: bool) -> bool:
 var _click_requested := false
 
 func _physics_process(_delta: float) -> void:
-	if not active or panel.visible or dialog.visible:
+	if not active:
+		return
+	if not _within_hall_footprint(workspace.hall.to_local(actor.global_position)):
+		leave()
+		return
+	if panel.visible or dialog.visible:
 		_click_requested = false
 		return
 	var camera := get_viewport().get_camera_3d()
@@ -270,7 +294,7 @@ func _physics_process(_delta: float) -> void:
 	var hit: Variant = workspace.cursor_floor(camera)
 	preview.visible = hit is Vector3
 	if not preview.visible:
-		report("Aim at the hall floor to place.")
+		report("Aim at the hall floor or mezzanine to place.")
 		return
 	pending.position = snapped_floor(hit, snap_enabled and not Input.is_physical_key_pressed(KEY_SHIFT), snap_step) + nudge
 	preview.position = pending.position
@@ -288,7 +312,7 @@ func _physics_process(_delta: float) -> void:
 			report(result)
 
 static func snapped_floor(point: Vector3, enabled: bool, step: float) -> Vector3:
-	return Vector3(snappedf(point.x, step), 0.0, snappedf(point.z, step)) if enabled else Vector3(point.x, 0, point.z)
+	return Vector3(snappedf(point.x, step), point.y, snappedf(point.z, step)) if enabled else point
 
 func spawn_requested() -> void:
 	if catalog.selected >= 0:
@@ -409,7 +433,7 @@ func file_selected(path: String) -> void:
 	if not result.ok:
 		report(result.error)
 		return
-	var issue := workspace.replace_all(result.records)
+	var issue := workspace.replace_all(LayoutReference.migrate(result.records))
 	if issue.is_empty():
 		cancel_preview()
 		refresh_list()

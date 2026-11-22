@@ -1,12 +1,14 @@
 # RD-014B — Engineering layout editor
 
-Run the project with **Godot 4.7.2** using **F5** or `godot --path .`. Turn around at the Systems Test Chamber spawn and walk through the signed Engineering Test Hall doorway. Press **L** on the main hall floor to open the editor.
+Run the project with **Godot 4.7.2** using `godot --path . -- --workshop-layout`. In the Godot editor, add `-- --workshop-layout` to the run arguments before using **F5**. Turn around at the Systems Test Chamber spawn and walk through the signed Engineering Test Hall doorway. Press **L** on the hall floor or mezzanine to open the editor.
+
+The workshop flag enables unrestricted layout controls only in debug builds. An ordinary launch plays the approved layout with gameplay controls. Walking into either storage cell or back to the Systems Test Chamber closes layout mode.
 
 Choose an entry from the catalog and press **Spawn**. Walk and point the crosshair at the floor. A cyan preview is clear to place and a red preview is blocked. Click to commit it. The panel list can select anything in the layout, including room and door markers.
 
 | Control | Action |
 | --- | --- |
-| L | Open layout mode on the main floor or exit while walking |
+| L | Open layout mode on the hall floor or mezzanine, or exit while walking |
 | Tab | Toggle the tools panel and walking controls |
 | Left click | Select under the crosshair or commit the current preview |
 | G or **Move** | Pick up the selected placeholder for repositioning |
@@ -46,8 +48,8 @@ Dimensions follow local X × Y × Z in meters. The fabrication tables have open 
 - **Load…** opens that folder first. Pick a save or a previously exported JSON to restore it, including after restarting the project. Invalid or colliding imports leave the current arrangement intact.
 - **Export JSON…** lets you choose the directory and filename. Save and export use the same schema, so either file can be loaded. Existing destinations are protected. Pick a fresh filename if an export already exists. Atomic publication uses Linux hard links, so the destination filesystem must support them.
 
-Version 1 stores `schema_version`, `coordinate_space` (`engineering_test_hall_local`), `units`, and a `records` array. Each record has a unique `id`, catalog `type`, display `name`, `position`, `yaw`, `size`, and `properties` object. The optional `properties.notes` value is the planning note. Both vectors are in X/Y/Z order and measured in meters. Position is the center of the footprint at floor level. The hall origin is the center of its entrance at the floor, +Z points toward the mezzanine, +X toward the stair side, and +Y up. Yaw uses Godot’s right-handed rotation about +Y in radians.
+Version 1 stores `schema_version`, `coordinate_space` (`engineering_test_hall_local`), `units`, and a `records` array. Each record has a unique `id`, catalog `type`, display `name`, `position`, `yaw`, `size`, and `properties` object. The optional `properties.notes` value is the planning note. Both vectors are in X/Y/Z order and measured in meters. Position is the center of the footprint on the selected support surface. The hall origin is the center of its entrance at the floor, +Z points toward the mezzanine, +X toward the stair side, and +Y up. Yaw uses Godot’s right-handed rotation about +Y in radians.
 
-The editor places items on the ground floor, including beneath the mezzanine where there is headroom. Clearance uses collision geometry and does not include thin decorative steelwork without a collider. The room footprint and doorway glyphs communicate proposed changes to the shop.
+The editor places items on the hall slab and mezzanine deck. The selected surface sets Y while the grid controls X and Z. Equipment can also go beneath the mezzanine where there is headroom. Clearance uses collision geometry and does not include thin decorative steelwork without a collider. The room footprint and doorway glyphs communicate proposed changes to the shop.
 
 ![Layout tools, committed equipment and placement feedback](editor-preview.jpg)
