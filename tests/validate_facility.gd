@@ -76,8 +76,11 @@ func run() -> void:
 	# Collision sweep against every room surface and each object.
 	otis.position = Vector3(0, 0.02, 3)
 	await physics_frame
-	for motion in [Vector3(0, -2, 0), Vector3(0, 6, 0), Vector3(20, 0, 0), Vector3(-20, 0, 0), Vector3(0, 0, 20), Vector3(0, 0, -20)]:
+	for motion in [Vector3(0, -2, 0), Vector3(0, 6, 0), Vector3(20, 0, 0), Vector3(-20, 0, 0), Vector3(0, 0, -20)]:
 		check(otis.test_move(otis.global_transform, motion), "Room collision: " + str(motion))
+	# The south wall is still solid beside the Engineering Test Hall doorway.
+	var off_aperture := Transform3D(otis.global_basis, Vector3(-2, 0.02, 4.9))
+	check(otis.test_move(off_aperture, Vector3(0, 0, 3)), "South partition collision beside the hall doorway")
 	for kind in ["Crate", "Generator", "Terminal"]:
 		var object := (facility.get("generator") if kind == "Generator" else facility.get_node(kind)) as InteractableObject
 		otis.position = object.global_position + Vector3(0, -0.3, 2)

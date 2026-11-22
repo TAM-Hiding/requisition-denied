@@ -2,6 +2,9 @@
 
 Linux-first, low-poly immersive systems game built with **Godot 4.7.2 / GDScript**.
 
+RD-014A connects the Systems Test Chamber to a 60 × 80 ft Engineering Test Hall.
+See the [hall layout and playtest route](docs/engineering-test-hall/README.md).
+
 RD-013 adds hold-to-sprint, jumping, crouching, belly crawling and validated
 ledge climbing. Carried mass modifies jump height and sprint speed while the
 existing physical props, Uni-Bolt, machinery and satchel remain available.
