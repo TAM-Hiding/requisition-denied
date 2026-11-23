@@ -27,7 +27,7 @@ func _ready() -> void:
 	contact_monitor = true
 	max_contacts_reported = 8
 	collision_layer = 1 | 16
-	collision_mask = 1 | 2 | 16
+	collision_mask = InteractableObject.WORLD_COLLISION_MASK | 16
 	_shape(Vector3(0.49, 0.34, 0.38), Vector3(0, 0.061, 0))
 	_shape(Vector3(0.35, 0.39, 0.17), Vector3(0, -0.285, 0))
 

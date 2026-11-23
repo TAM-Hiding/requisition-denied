@@ -52,3 +52,5 @@ Run the regression suite with `bash tests/validate.sh`.
 ## In-game views
 
 [Hall span](hall-span.jpg) · [Crane over the mezzanine](mezzanine.jpg) · [Wireless remote](wireless-remote.jpg) · [Maintenance incident](maintenance-fault.jpg)
+
+[Moving-platform playtest and Linux NVIDIA offload](moving-platforms.md)
