@@ -30,9 +30,10 @@ static func entries() -> Array[Dictionary]:
 			var section: Vector2 = row[2]
 			var size := Vector3(sizes[index], section.x, section.y)
 			var entry := {"category": row[0], "icon": row[1], "title": "%s %s" % [labels[index], row[0].to_lower()],
-				"size": size, "shapes": [], "volume": 0.0}
+				"size": size, "shapes": [], "volume": 0.0, "first_moment": Vector3.ZERO}
 			describe(entry, index)
 			entry.mass = snappedf(entry.volume * DENSITY, 0.01)
+			entry.center_of_mass = entry.first_moment / entry.volume
 			catalog.append(entry)
 	return catalog
 
@@ -90,7 +91,9 @@ static func add_box(entry: Dictionary, size: Vector3, at: Vector3) -> void:
 	var mesh := BoxMesh.new()
 	mesh.size = size
 	entry.shapes.append([shape, mesh, Transform3D(Basis.IDENTITY, at)])
-	entry.volume += size.x * size.y * size.z
+	var volume := size.x * size.y * size.z
+	entry.volume += volume
+	entry.first_moment += at * volume
 
 static func add_prism(entry: Dictionary, outline: PackedVector2Array, height: float,
 		pose := Transform3D.IDENTITY, render := true) -> void:
@@ -107,10 +110,13 @@ static func add_prism(entry: Dictionary, outline: PackedVector2Array, height: fl
 	for i in range(1, count - 1):
 		indices.append_array([0, i + 1, i, count, count + i, count + i + 1])
 	var area := 0.0
+	var area_moment := Vector2.ZERO
 	for i in count:
 		var j := (i + 1) % count
 		indices.append_array([i, j, count + j, i, count + j, count + i])
-		area += outline[i].cross(outline[j])
+		var cross := outline[i].cross(outline[j])
+		area += cross
+		area_moment += (outline[i] + outline[j]) * cross
 	# Arc strips are counterclockwise or clockwise depending on the wall.
 	if area < 0.0:
 		indices.reverse()
@@ -121,7 +127,11 @@ static func add_prism(entry: Dictionary, outline: PackedVector2Array, height: fl
 		surface.generate_normals()
 		mesh = surface.commit()
 	entry.shapes.append([shape, mesh, pose])
-	entry.volume += absf(area) * 0.5 * height
+	var volume := absf(area) * 0.5 * height
+	entry.volume += volume
+	if not is_zero_approx(area):
+		var centroid := area_moment / (3.0 * area)
+		entry.first_moment += (pose * Vector3(centroid.x, 0.0, centroid.y)) * volume
 
 ## Only the exposed walls and rims are rendered. Cylinder normals are
 ## radial, while the two cut ends keep their flat annular faces.

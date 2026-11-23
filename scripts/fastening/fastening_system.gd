@@ -144,6 +144,13 @@ func probe(origin: Vector3, direction: Vector3, reach: float, actor: PhysicsBody
 			return record_matches(group, bolt) and usable_body(bolt.a) and bolt.head().distance_to(entry) < 0.025)):
 		result.issue = "FASTENER OBSTRUCTED"
 		return result
+	var root_a := physics_root(a) as RigidBody3D
+	var root_b := physics_root(b) as RigidBody3D
+	if root_a != null and root_b != null and root_a != root_b and not anchored(root_a) and not anchored(root_b) \
+			and (root_a.has_meta(CraneRigging.ATTACHED_META) or root_b.has_meta(CraneRigging.ATTACHED_META)) \
+			and root_a.mass + root_b.mass > BridgeCrane.NOMINAL_CAPACITY_KG:
+		result.issue = "OC-01 RATED LOAD EXCEEDED"
+		return result
 	result.issue = ""
 	return result
 
@@ -381,6 +388,19 @@ func physics_root(body: PhysicsBody3D) -> PhysicsBody3D:
 func connected_root(body: PhysicsBody3D) -> PhysicsBody3D:
 	var root: PhysicsBody3D = _roots.get(body)
 	return root if usable_body(root) else null
+
+## Members of a compound rigid island, including its solver root.
+func connected_members(body: PhysicsBody3D) -> Array[PhysicsBody3D]:
+	var root := physics_root(body)
+	var result: Array[PhysicsBody3D] = [root]
+	for member in _roots:
+		if member != root and _roots[member] == root and usable_body(member):
+			result.append(member)
+	return result
+
+## The root's RigidBody mass includes its followers while compounded.
+func uncombined_mass(body: RigidBody3D) -> float:
+	return _root_masses.get(body, body.mass)
 
 func incident(body: PhysicsBody3D) -> Array[FastenerConnection]:
 	return connections.filter(func(edge: FastenerConnection) -> bool: return edge.a == body or edge.b == body)
@@ -644,8 +664,12 @@ func build_island(island: Array[PhysicsBody3D]) -> void:
 	for member in island:
 		if anchored(member) and not anchored(root):
 			root = member
-		elif member is RigidBody3D and root is RigidBody3D and not anchored(root) and member.mass > root.mass:
-			root = member
+		elif member is RigidBody3D and root is RigidBody3D and not anchored(root):
+			# Keep the current suspension point when a heavier member is joined to a moving island.
+			var member_rigged := member.has_meta(CraneRigging.ATTACHED_META)
+			var root_rigged := root.has_meta(CraneRigging.ATTACHED_META)
+			if (member_rigged and not root_rigged) or (member_rigged == root_rigged and member.mass > root.mass):
+				root = member
 	if root is RigidBody3D and not anchored(root):
 		_root_masses[root] = root.mass
 	for member in island:

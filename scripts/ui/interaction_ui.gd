@@ -1,6 +1,7 @@
 extends CanvasLayer
 var service := InteractionService.new()
 var crane_control := CraneRemoteControls.new()
+var strap_mode := StrapMode.new()
 var inventory: InventoryScreen
 var layout_editor: LayoutEditor
 var hud: Control
@@ -36,11 +37,14 @@ func _ready() -> void:
 	add_child(inventory)
 	inventory.opening.connect(cancel_hold)
 	inventory.opening.connect(crane_control.disconnect_remote)
+	inventory.opening.connect(strap_mode.leave)
 	otis.equipment.changed.connect(crane_control.check_ownership.bind(otis))
 	layout_editor = LayoutEditor.new()
 	layout_editor.name = "LayoutEditor"
-	layout_editor.configure(get_parent().get_node("EngineeringTestHall"), otis)
+	var hall: Node3D = get_parent().get_node("EngineeringTestHall")
+	layout_editor.configure(hall, otis)
 	add_child(layout_editor)
+	strap_mode.configure(otis, hall)
 	hud = Control.new()
 	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -48,7 +52,8 @@ func _ready() -> void:
 	layout_editor.active_changed.connect(func(enabled: bool) -> void:
 		hud.visible = not enabled
 		if enabled:
-			crane_control.disconnect_remote())
+			crane_control.disconnect_remote()
+			strap_mode.leave())
 	var heading := Label.new()
 	heading.text = "REQUISITION DENIED   /   DEVELOPMENT"
 	heading.position = Vector2(24, 18)
@@ -135,6 +140,7 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	crane_control.update(otis, crane_context_ready())
+	strap_mode.update(strap_context_ready())
 	if inventory.active or layout_editor.active:
 		return
 	var tool := otis.equipped_tool()
@@ -148,6 +154,8 @@ func _physics_process(delta: float) -> void:
 	var pendant := crane_control.held_remote(otis)
 	if crane_active:
 		tool_readout.text = crane_control.status_text()
+	elif strap_mode.active:
+		tool_readout.text = strap_mode.status_text()
 	elif pendant != null:
 		tool_readout.text = "OC-01 REMOTE  •  V Connect"
 	elif tool != null and gameplay_input_allowed():
@@ -170,6 +178,8 @@ func _physics_process(delta: float) -> void:
 	var mount_issue := ""
 	if crane_active:
 		help.text = "V Disconnect  •  1 Stow  •  X Drop  •  C Camera"
+	elif strap_mode.active:
+		help.text = "H / Esc Exit Strap Mode  •  LMB Select  •  E Connect at Hook  •  RMB Clear / Release"
 	elif pendant != null and not otis.view_camera.orbiting:
 		help.text = "V Connect  •  1 Stow  •  X Drop  •  E Context"
 	elif placing:
@@ -184,10 +194,12 @@ func _physics_process(delta: float) -> void:
 		help.text = "Hold G Grab  •  1 Stow  •  X Drop Tool  •  E Context  •  F3 Debug"
 	else:
 		help.text = "WASD Move / Shift+W Sprint / Space Jump-Climb / Alt Crouch-Hold Crawl  •  E Context  •  Hold E Stow  •  1 Equip  •  G Drop / hold to place or grab  •  Esc Cursor  •  F3 Debug  •  Terminal Settings"
-	if not crane_active and not placing and not otis.view_camera.orbiting:
+	if not crane_active and not strap_mode.active and not placing and not otis.view_camera.orbiting:
 		help.text += "  •  C Camera  •  K Orbit"
 		if layout_editor.can_enter():
 			help.text += "  •  L Layout"
+		if strap_mode.can_enter():
+			help.text = "H Strap Mode  •  " + help.text
 	status.visible = feedback_time > 0 or tool != null or not placing or not otis.placement.valid or socket != null
 	advance_hold(delta)
 	if gameplay_input_allowed():
@@ -204,7 +216,7 @@ func _physics_process(delta: float) -> void:
 			close_menu()
 		elif menu_actions != menu_target.query_actions():
 			rebuild_actions()
-	var hit := {} if crane_active else otis.target_hit()
+	var hit := {} if crane_active or strap_mode.active else otis.target_hit()
 	target = null
 	target_distance = 0.0
 	if not hit.is_empty() and hit.collider is InteractableObject:
@@ -221,7 +233,7 @@ func _physics_process(delta: float) -> void:
 		center = active_view.unproject_position(aim_point)
 	crosshair.position = center - crosshair.size * 0.5
 	crosshair.modulate = Color("a2e7df") if target != null else Color.WHITE
-	if menu_open or crane_active:
+	if menu_open or crane_active or strap_mode.active:
 		prompt.text = ""
 	elif Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		prompt.text = "Left-click to resume"
@@ -333,7 +345,7 @@ func _input(event: InputEvent) -> void:
 			perform_action(&"repair")
 		get_viewport().set_input_as_handled()
 		return
-	if handle_crane_input(event):
+	if handle_crane_input(event) or handle_strap_input(event):
 		get_viewport().set_input_as_handled()
 		return
 	if not menu_open and otis.view_camera.route(event):
@@ -411,6 +423,7 @@ func handle_crane_input(event: InputEvent) -> bool:
 		if crane_control.active():
 			crane_control.disconnect_remote()
 		elif crane_control.connect_remote(item, otis):
+			strap_mode.leave()
 			cancel_hold()
 			otis.placement.clear_gesture()
 		else:
@@ -437,6 +450,31 @@ func handle_crane_input(event: InputEvent) -> bool:
 		return false
 	return crane_control.route(event) or event.is_action(&"interact") or event.is_action(&"drop_item") \
 		or event.is_action(&"precision_rotate")
+
+func strap_context_ready() -> bool:
+	return not crane_control.active() and crane_context_ready()
+
+
+func handle_strap_input(event: InputEvent) -> bool:
+	if event.is_action_pressed(StrapMode.TOGGLE) and not event.is_echo():
+		if strap_mode.active:
+			strap_mode.leave()
+		elif strap_context_ready():
+			if strap_mode.enter():
+				cancel_hold()
+				suspend_tool_input()
+				otis.placement.clear_gesture()
+				otis.set_tool_aiming(false)
+			else:
+				show_feedback("Strap Mode is available in the Engineering Test Hall.")
+		return true
+	if not strap_mode.active:
+		return false
+	if not strap_context_ready() or event.is_action_pressed(&"camera_orbit") or event.is_action_pressed(&"drop_item"):
+		strap_mode.leave()
+		return false
+	return strap_mode.route(event, show_feedback)
+
 
 func handle_placement_controls(event: InputEvent) -> bool:
 	if event.is_action("interact") or event.is_action("equip_first"):
@@ -505,6 +543,7 @@ func handle_fastening_input(event: InputEvent) -> bool:
 func set_terminal_active(active: bool) -> void:
 	if active:
 		crane_control.disconnect_remote()
+		strap_mode.leave()
 		suspend_tool_input()
 	cancel_hold()
 	otis.set_tool_aiming(false)
@@ -611,6 +650,7 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and application_focused:
 		application_focused = false
 		crane_control.disconnect_remote()
+		strap_mode.leave()
 		if is_instance_valid(inventory):
 			inventory.bag.cancel_gestures()
 			inventory.turn_left = false

@@ -23,6 +23,29 @@ const DEFINITIONS := {
 	"personnel_door_marker": {"name": "Personnel Door Marker", "size": Vector3(0.96, 2.11, 0.22), "marker": true},
 }
 
+## Nominal gameplay mass and center fractions for modeled layout fixtures.
+const MASS_ESTIMATES := {
+	"fabrication_table_long": [322.0, Vector3(0.0, 0.78, 0.0)],
+	"fabrication_table_medium": [170.0, Vector3(0.0, 0.78, 0.0)],
+	"fabrication_table_small": [110.0, Vector3(0.0, 0.76, 0.0)],
+	"workbench": [82.0, Vector3(0.0, 0.61, 0.0)],
+	"milling_machine": [970.0, Vector3(0.0, 0.42, 0.06)],
+	"engine_lathe": [1310.0, Vector3(-0.11, 0.56, 0.0)],
+	"drill_press": [95.0, Vector3(0.0, 0.49, 0.10)],
+	"horizontal_bandsaw": [365.0, Vector3(0.04, 0.36, 0.0)],
+	"storage_cabinet": [83.0, Vector3(0.0, 0.44, 0.0)],
+	"lockers": [67.0, Vector3(0.0, 0.46, 0.0)],
+}
+
+static func mass_estimate(type: String, size: Vector3, display_name: String) -> Dictionary:
+	if not MASS_ESTIMATES.has(type):
+		return {}
+	var estimate: Array = MASS_ESTIMATES[type]
+	var center: Vector3 = estimate[1]
+	return {"name": display_name, "mass_kg": estimate[0], "center": center * size,
+		"confidence": LiftMassProperties.Confidence.ESTIMATED}
+
+
 static func types() -> Array[String]:
 	var result: Array[String] = []
 	result.assign(DEFINITIONS.keys())

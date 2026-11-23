@@ -1,23 +1,14 @@
 class_name CraneSuspension
 extends RefCounted
-## Unloaded hoist. Positive velocity raises the hook, shortening the commanded suspension.
+## Hoist motor. Positive velocity reels in the paid-out suspension length.
 
 const NOMINAL_BLOCK_MASS_KG := 225.0
-# Center-of-mass eccentricity of the hook and latch under the swivel bearing.
-const BLOCK_OFFSET := Vector3(0.014, 0.0, 0.009)
-
 var outlet_height: float
 var minimum_length: float
 var maximum_length: float
 var height: float
 var target: float
 var velocity := 0.0
-var swivel_yaw := 0.0
-var swivel_velocity := 0.0
-
-var swivel_inertia := 12.0
-var swivel_friction := 0.09
-var swivel_damping := 0.75
 
 
 func _init(outlet_y: float, shortest: float, longest: float, initial_height: float) -> void:
@@ -41,16 +32,6 @@ func stop(acceleration: float) -> void:
 	request_height(height + velocity * absf(velocity) / (2.0 * acceleration))
 
 
-func apply_swivel_impulse(newton_meter_seconds: float) -> void:
-	swivel_velocity += newton_meter_seconds / swivel_inertia
-
-
-func react_to_carriage(delta_velocity: Vector3) -> void:
-	var offset := BLOCK_OFFSET.rotated(Vector3.UP, swivel_yaw)
-	var inertial_impulse := -NOMINAL_BLOCK_MASS_KG * delta_velocity
-	apply_swivel_impulse(offset.cross(inertial_impulse).y)
-
-
 func advance(delta: float, speed: float, acceleration: float, can_raise: bool, can_lower: bool) -> void:
 	var distance := target - height
 	var direction := signf(distance)
@@ -66,7 +47,3 @@ func advance(delta: float, speed: float, acceleration: float, can_raise: bool, c
 		if is_equal_approx(height, outlet_height - maximum_length) and velocity < 0.0 \
 				or is_equal_approx(height, outlet_height - minimum_length) and velocity > 0.0:
 			velocity = 0.0
-
-	swivel_velocity = move_toward(swivel_velocity, 0.0, swivel_friction * delta)
-	swivel_velocity *= exp(-swivel_damping * delta)
-	swivel_yaw = wrapf(swivel_yaw + swivel_velocity * delta, -PI, PI)

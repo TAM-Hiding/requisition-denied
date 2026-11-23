@@ -96,8 +96,10 @@ func install_overhead_crane(dark: Material, amber: Material, steel: Material) ->
 	var hall: Node3D = $EngineeringTestHall
 	overhead_crane = BridgeCrane.new()
 	overhead_crane.name = "OverheadCrane"
+	overhead_crane.fastening_system = fastening
 	hall.add_child(overhead_crane)
 	overhead_crane.configure(hall)
+	overhead_crane.rig_disconnected.connect($InteractionUI.show_feedback)
 
 	var cradle := Node3D.new()
 	cradle.name = "CraneRemoteCradle"

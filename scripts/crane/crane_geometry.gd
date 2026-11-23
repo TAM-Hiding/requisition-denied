@@ -24,7 +24,7 @@ var hook_anchor: Marker3D
 
 var _rail_height: float
 var _chain: MultiMesh
-var _chain_length := -1.0
+var _chain_end := Vector3.INF
 var _paint := finish("a48140", 0.12)
 var _panel := finish("737d7c")
 var _frame := finish("3c4449")
@@ -57,12 +57,17 @@ func build(hall_width: float, hall_depth: float, rail_height: float) -> void:
 func pose(bridge_z: float, trolley_x: float, hook_y: float, hook_yaw: float) -> void:
 	bridge.position.z = bridge_z
 	trolley.position.x = trolley_x
-	hook.position.y = hook_y
+	hook.position = Vector3.UP * hook_y
 	hook.rotation.y = hook_yaw
-	# The upper falls do not rotate with the freely swiveling hook.
-	var length := maxf(0.0, suspension_origin_y - hook_y - 0.23)
-	if not is_equal_approx(length, _chain_length):
-		pose_chain(length)
+	pose_chain(Vector3.UP * (hook_y + 0.23))
+
+
+func pose_suspended(bridge_z: float, trolley_x: float, block: Transform3D) -> void:
+	bridge.position.z = bridge_z
+	trolley.position.x = trolley_x
+	hook.global_transform = block
+	pose_chain(trolley.to_local(block * (Vector3.UP * 0.23)))
+
 
 func build_runway(runway: Node3D, side: float, rail_x: float, depth: float) -> void:
 	var rail := group(runway, &"WestRunway" if side < 0.0 else &"EastRunway",
@@ -197,18 +202,27 @@ func build_chain() -> void:
 	falls.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	trolley.add_child(falls)
 
-func pose_chain(length: float) -> void:
-	_chain_length = length
+func pose_chain(end: Vector3) -> void:
+	if end.is_equal_approx(_chain_end):
+		return
+	_chain_end = end
+	var outlet := Vector3.UP * suspension_origin_y
+	var segment := end - outlet
+	var length := segment.length()
 	var count := clampi(ceili(length / CHAIN_PITCH), 0, _chain.instance_count >> 1)
 	_chain.visible_instance_count = count * 2
+	if count == 0:
+		return
+	var inclination := Basis(Quaternion(Vector3.DOWN, segment / length))
 	for index in count:
 		var twist := PI / 5.0 if index % 2 == 0 else PI * 0.7
-		var orient := Basis(Vector3.UP, twist) * Basis(Vector3.RIGHT, PI * 0.5)
+		var orient := inclination * Basis(Vector3.UP, twist) * Basis(Vector3.RIGHT, PI * 0.5)
 		var shape := orient.scaled_local(Vector3(0.72, 1.0, 1.22))
-		var center := suspension_origin_y - length * (index + 0.5) / count
+		var center := outlet + segment * ((index + 0.5) / count)
 		for fall in 2:
 			var x := -0.096 if fall == 0 else 0.096
-			_chain.set_instance_transform(index * 2 + fall, Transform3D(shape, Vector3(x, center, 0)))
+			_chain.set_instance_transform(index * 2 + fall, Transform3D(shape, center + Vector3.RIGHT * x))
+
 
 func hook_mesh() -> ArrayMesh:
 	var surface := SurfaceTool.new()

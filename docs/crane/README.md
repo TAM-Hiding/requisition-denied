@@ -1,6 +1,8 @@
-# RD-015A · OC-01 overhead bridge crane
+# OC-01 overhead bridge crane
 
-OC-01 is a single-girder bridge crane in the Engineering Test Hall. Its rated capacity is 50,000 kg and the hook block has a nominal mass of 225 kg. These are equipment specifications. The unloaded hoist presents two visible chain falls, a damped hook that passively swivels with carriage acceleration, and a world-space attachment transform for future rigging.
+[RD-015B suspended loads, Strap Mode, and playtest scenarios](suspended-loads.md)
+
+OC-01 is a single-girder bridge crane in the Engineering Test Hall. Its rated capacity is 50,000 kg and the hook block has a nominal mass of 225 kg. These are equipment specifications. The hoist presents two visible chain falls and a physical hook that swings and swivels passively.
 
 ## Playtest
 
@@ -25,9 +27,9 @@ Coordinates are relative to the hall, with positive Z toward the mezzanine. The 
 | --- | --- | --- | --- | --- |
 | Bridge, Z | 0.90–23.484 m | 1.65 m/s | 0.90 m/s² | 1.35 m/s² |
 | Trolley, X | −8.254–8.254 m | 1.30 m/s | 0.95 m/s² | 1.50 m/s² |
-| Hook center, Y | 0.65–7.97 m | 0.85 m/s | 1.25 m/s² | 1.25 m/s² |
+| Hook center, Y | 0.44–7.97 m commanded | 0.85 m/s | 1.25 m/s² | 1.25 m/s² |
 
-The wheel changes the target by 0.10 m per step, or 0.01 m in precision mode. Precision also caps powered speed at 25%. The unloaded hoist stops before intersecting solid obstacles. Raise it above the deck or machinery before traversing. Its obstruction probe exerts no forces and lets the assembly move away if a separate object has already overlapped it.
+The wheel changes the target by 0.10 m per step, or 0.01 m in precision mode. Precision also caps powered speed at 25%. The physical block can rest against solid obstacles and raise away. Lift it above the deck or machinery before traversing.
 
 ## Maintenance
 
@@ -43,7 +45,7 @@ Four qualifying horizontal end-stop impacts trigger one incident affecting three
 
 Damaged components remain functional and emit light smoke and occasional sparks. Broken components emit dark smoke and heavier sparks and restrict their associated mechanism. A broken hoist motor prevents raising. A broken brake stops hoist travel. The hook remains suspended.
 
-To test maintenance, raise the hook, drive the trolley into an end stop at full speed, reverse far enough to reach full speed again, and repeat four times. Disconnect the remote, aim at an affected relay, and press **E** to inspect and **E** again to repair. Repair clears the local effects and restores the associated function. Incident records last for the current Facility session. Physical attachment, load swing, and load forces are reserved for RD-015B.
+To test maintenance, raise the hook, drive the trolley into an end stop at full speed, reverse far enough to reach full speed again, and repeat four times. Disconnect the remote, aim at an affected relay, and press **E** to inspect and **E** again to repair. Repair clears the local effects and restores the associated function. Incident records last for the current Facility session. See the suspended-load guide for attachment, swing, and center-of-mass visualization.
 
 Run the regression suite with `bash tests/validate.sh`.
 

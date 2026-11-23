@@ -54,6 +54,10 @@ func configure(record: Dictionary, ghost := false) -> void:
 	_label.text = record.name
 	if collision_changed:
 		update_collision()
+	if is_instance_valid(_body):
+		var estimate := LayoutCatalog.mass_estimate(_type, _base_size, record.name)
+		if not estimate.is_empty():
+			_body.set_meta(&"lift_mass_properties", estimate)
 	update_highlight()
 
 func set_editing(enabled: bool) -> void:

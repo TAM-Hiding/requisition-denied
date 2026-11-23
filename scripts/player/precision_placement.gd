@@ -143,6 +143,9 @@ func begin_world(target: InteractableObject) -> bool:
 	if not is_instance_valid(root_body):
 		report_grab("Invalid assembly state. No live physics root.")
 		return false
+	if root_body.has_meta(CraneRigging.ATTACHED_META):
+		report_grab("Release the crane strap before starting a precision grab.")
+		return false
 	var item := root_body as InteractableObject
 	if item == null or item.mobility() == ObjectDefinition.Mobility.FIXED:
 		report_grab("The assembly is anchored." if target.fastened else "The object is fixed.")
