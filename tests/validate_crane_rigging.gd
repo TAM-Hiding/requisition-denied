@@ -97,7 +97,7 @@ func run() -> void:
 		"Rigging rejects masses above the marked crane capacity")
 	check(not hoist.strap.attach(hoist.hook, hoist.throat(), hoist.load_body, hit, NAN).is_empty(),
 		"Rigging rejects invalid mass")
-	check(not hoist.strap.attach(hoist.hook, hoist.throat() + Vector3.UP, hoist.load_body, hit, 85.0).is_empty(),
+	check(not hoist.strap.attach(hoist.hook, hoist.throat() + Vector3.UP * 5.1, hoist.load_body, hit, 85.0).is_empty(),
 		"Rigging rejects attachment points out of hook reach")
 	hoist.load_body.freeze = true
 	check(not hoist.attach(Vector3(0, 0.10, 0)).is_empty(), "An anchored load cannot be rigged")
@@ -153,6 +153,10 @@ func run() -> void:
 	hoist.queue_free()
 	await frames(2)
 	await test_mezzanine_delivery()
+	await test_strap_lengths()
+	await test_stock_release("Long square tubing", false)
+	await test_stock_release("Long steel rod", false)
+	await test_stock_release("Long square tubing", true)
 	print("RD-015B strap constraint: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures else 0)
 
@@ -231,3 +235,123 @@ func test_mezzanine_delivery() -> void:
 		and beam.get_parent() == hall, "Detached load remains on the deck without reparenting or drift")
 	facility.queue_free()
 	await frames(2)
+
+
+func test_strap_lengths() -> void:
+	var hoist := make_hoist(40.0)
+	await frames(12)
+	var load_eye := hoist.load_body.to_global(Vector3.UP * 0.10)
+	var near := hoist.throat().distance_to(load_eye)
+	check(hoist.attach(Vector3.UP * 0.10).is_empty()
+		and is_equal_approx(hoist.strap.length_m, near + 0.03), "Short strap keeps its original measured length and slack")
+	hoist.strap.detach()
+	hoist.strap.connect_distance_m = 0.95
+	check(not hoist.strap.attach(hoist.hook, load_eye + Vector3.UP, hoist.load_body, load_eye, 40.0).is_empty(),
+		"A configured shorter maximum still limits attachment reach")
+	check(hoist.attach(Vector3.UP * 0.10).is_empty(), "The shorter configuration accepts nearby endpoints")
+	hoist.strap.detach()
+	hoist.strap.connect_distance_m = 5.0
+	hoist.hook.position.y = load_eye.y + 5.17
+	await frames(3)
+	var throat := hoist.throat()
+	check(not hoist.strap.attach(hoist.hook, throat + Vector3.UP * 0.05, hoist.load_body, load_eye, 40.0).is_empty(),
+		"A span beyond the 5 m rated strap is rejected")
+	var before := hoist.load_body.global_transform
+	check(hoist.attach(Vector3.UP * 0.1).is_empty() and is_equal_approx(hoist.strap.length_m, 5.0)
+		and hoist.load_body.global_transform == before, "A 5 m strap attaches without snapping or exceeding its rating")
+	await frames(4)
+	var segment_a := hoist.strap.get_node("StrapSegment1") as MeshInstance3D
+	var segment_b := hoist.strap.get_node("StrapSegment2") as MeshInstance3D
+	check(segment_a.visible and segment_b.visible and is_equal_approx(
+		segment_a.global_basis.y.length() + segment_b.global_basis.y.length(), 5.0),
+		"At full length the two webbing segments span the actual endpoints")
+	hoist.speed = 0.45
+	await frames(135)
+	check(hoist.load_body.position.y > 0.90 and hoist.strap.tension_newtons > 0.0,
+		"Full-length strap transmits tension and raises a physical load")
+	hoist.speed = -0.45
+	await frames(145)
+	check(hoist.load_body.position.y < 0.13 and hoist.strap.tension_newtons == 0.0 and hoist.strap.slack_m > 0.02,
+		"Full-length strap goes slack when the load is supported again")
+	check(segment_a.global_transform.is_finite() and segment_b.global_transform.is_finite(),
+		"Full-length slack visual remains finite")
+	hoist.queue_free()
+	await frames(2)
+
+
+func test_stock_release(stock_name: String, assembled: bool) -> void:
+	var facility := preload("res://scenes/facility.tscn").instantiate()
+	root.add_child(facility)
+	current_scene = facility
+	var crane: BridgeCrane = facility.overhead_crane
+	var actor := facility.get_node("Otis") as OtisController
+	var supply: ScrapSupply = facility.scrap_supply
+	var fastening: FasteningSystem = facility.fastening
+	var rod := stock_name == "Long steel rod"
+	var label := stock_name + (" assembly" if assembled else "")
+	await frames(12)
+	var stock := dispense_stock(supply, stock_name)
+	if stock == null:
+		check(false, "Catalog can dispense " + stock_name)
+		facility.queue_free()
+		await frames(2)
+		return
+	var ground_drop := crane.to_global(Vector3(-2.02 if rod else -1.99, 0.13, 8.0))
+	actor.equipment.restore_world(stock, Transform3D(Basis.IDENTITY, ground_drop), false)
+	await frames(65)
+	check(stock.global_position.y < 0.10 and absf(stock.global_basis.x.y) < 0.02,
+		label + " settles horizontally after an ordinary drop")
+	var bolt: InstalledFastener
+	var plate: InteractableObject
+	var relative := Transform3D.IDENTITY
+	if assembled:
+		plate = dispense_stock(supply, "Medium flat plate")
+		var at := stock.global_position + Vector3(-0.14, 0.061, 0.0)
+		actor.equipment.restore_world(plate, Transform3D(Basis.IDENTITY, at), false)
+		await frames(18)
+		bolt = fastening.create_round(FasteningTool.GRADES[0])
+		var issue := fastening.install(bolt, at + Vector3.UP * 0.5, Vector3.DOWN, 1.0)
+		check(issue.is_empty() and stock.fastened and plate.fastened, "Uni-Bolt creates real release-test compound")
+		relative = stock.global_transform.affine_inverse() * plate.global_transform
+	var body := stock.assembly_root() as InteractableObject
+	var center_mode := body.center_of_mass_mode
+	var mass_before := body.mass
+	crane.adjust_hook_steps(-48, false)
+	await frames(465)
+	var dock := stock.to_global(Vector3(0.52 if rod else 0.49, 0.012 if rod else 0.043, 0))
+	var issue := crane.attach_load(stock, dock)
+	check(issue.is_empty() and crane.rigged_body() == body, label + " connects to the live hook")
+	crane.adjust_hook_steps(23, false)
+	await frames(360)
+	check(absf(stock.global_basis.x.y) > 0.95 and stock.global_position.y > 1.0,
+		label + " hangs upright before release")
+	var before := body.global_transform
+	body.linear_velocity = Vector3(0.20, -0.30, 0.08)
+	body.angular_velocity = Vector3(0.02, 0.07, 0.36)
+	var speed := body.linear_velocity
+	var spin := body.angular_velocity
+	check(crane.detach_load().is_empty() and crane.rigged_body() == null, label + " fully releases from the crane")
+	check(speed.length() > 0.2 and spin.length() > 0.2 and body.linear_velocity.is_equal_approx(speed)
+		and body.angular_velocity.is_equal_approx(spin) and body.global_transform == before,
+		label + " release preserves linear velocity, angular velocity and pose")
+	check(not body.lock_rotation and not body.freeze and not body.sleeping
+		and body.state == InteractableObject.State.WORLD and not body.has_meta(CraneRigging.ATTACHED_META)
+		and body.center_of_mass_mode == center_mode and is_equal_approx(body.mass, mass_before),
+		label + " returns to free world physics with its original mass data")
+	await frames(450)
+	check(absf(stock.global_basis.x.y) < 0.08 and stock.global_position.y < 0.16,
+		label + " physically falls over onto the floor after release")
+	if assembled:
+		check(bolt.state == InstalledFastener.State.INSTALLED and stock.fastened and plate.fastened
+			and stock.assembly_root() == body and plate.assembly_root() == body
+			and (stock.global_transform.affine_inverse() * plate.global_transform).is_equal_approx(relative),
+			"Released compound settles with its Uni-Bolt and relative component pose intact")
+	facility.queue_free()
+	await frames(2)
+
+
+func dispense_stock(supply: ScrapSupply, title: String) -> InteractableObject:
+	for index in supply.catalog.size():
+		if supply.catalog[index].title == title:
+			return supply.dispense(index)
+	return null

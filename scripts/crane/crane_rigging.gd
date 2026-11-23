@@ -5,9 +5,11 @@ extends Node3D
 
 const ATTACHED_META := &"crane_rigged"
 const MASS_CENTER_META := &"rig_original_mass_center"
+const MAX_LENGTH_M := 5.0
 
 @export var capacity_kg := 50000.0
-@export var connect_distance_m := 0.95
+## Maximum endpoint separation and resulting strap length for this crane.
+@export_range(0.18, 5.0, 0.01) var connect_distance_m := MAX_LENGTH_M
 @export var initial_slack_m := 0.03
 @export var minimum_length_m := 0.18
 @export var max_correction_mps := 3.0
@@ -65,13 +67,14 @@ func attach(hook: RigidBody3D, hook_world: Vector3, load_target: RigidBody3D, lo
 	if not hook_world.is_finite() or not load_world.is_finite() or not _valid_center(load_center):
 		return "The attachment point or load center is invalid."
 	var separation := hook_world.distance_to(load_world)
-	if separation > connect_distance_m or load_world.y > hook_world.y + 0.06:
-		return "Position the hook within %.2f m above the selected attachment point." % connect_distance_m
+	var maximum_length := clampf(connect_distance_m, 0.0, MAX_LENGTH_M)
+	if maximum_length <= 0.0 or separation > maximum_length or load_world.y > hook_world.y + 0.06:
+		return "Position the hook within %.2f m above the selected attachment point." % maximum_length
 
 	_hook = hook
 	_hook.tree_exiting.connect(detach)
 	_hook_local = hook.to_local(hook_world)
-	length_m = maxf(minimum_length_m, separation + initial_slack_m)
+	length_m = minf(maximum_length, maxf(minimum_length_m, separation + initial_slack_m))
 	slack_m = length_m - separation
 	_bind_load(load_target, load_world, load_mass, load_center)
 	_update_visual(hook_world, load_world)
@@ -156,7 +159,14 @@ func _unbind_load() -> void:
 		if _original_center_mode == RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM:
 			load_body.center_of_mass = _original_center
 		load_body.center_of_mass_mode = _original_center_mode
-		load_body.lock_rotation = _original_lock_rotation
+		if load_body is InteractableObject:
+			if load_body.state == InteractableObject.State.WORLD and not load_body.freeze:
+				# A spawned or hand-dropped object can be locked upright. Its suspended pose
+				# is arbitrary, so hand it back like a freely settling precision placement.
+				load_body.lock_rotation = false
+				load_body.sleeping = false
+		else:
+			load_body.lock_rotation = _original_lock_rotation
 		load_body.remove_meta(MASS_CENTER_META)
 		load_body.remove_meta(ATTACHED_META)
 	load_body = null

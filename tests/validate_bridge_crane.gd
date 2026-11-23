@@ -210,7 +210,8 @@ func test_unloaded_obstructions() -> void:
 	await reset_hook(0.0, 17.5, 3.75)
 	crane.set_controls(0, 1, false)
 	await advance(4.0)
-	check(crane.to_local(crane.hook.global_position).z < 19.1 and crane.bridge.position < 21.0
+	check(crane.to_local(crane.hook.global_position).z < 19.1 and absf(crane.bridge.velocity) < 0.12
+		and rad_to_deg(crane.swing_angle()) < crane.maximum_angle_degrees + 1.0
 		and crane.status_text().contains("HOOK PATH OBSTRUCTED"),
 		"The hook and chain stop at the mezzanine guardrail")
 	check(crane.maintenance.impact_count == 0, "Hook obstructions do not count as horizontal end-stop impacts")
@@ -264,13 +265,21 @@ func test_side_load_limit() -> void:
 	crane.set_controls(1, 0, false)
 	await advance(5.0)
 	var limited := rad_to_deg(crane.swing_angle())
-	check(limited > 22.0 and limited <= 25.05 and crane.trolley.velocity < 0.12,
+	check(limited > 27.0 and limited <= 30.05 and crane.trolley.velocity < 0.12,
 		"A retained hook progressively inhibits outward carriage movement at the side-load limit")
 	check(crane.status_text().contains("HOOK PATH OBSTRUCTED") and crane.maintenance.impact_count == 0,
 		"Side-load limiting uses obstruction feedback without adding maintenance damage")
 	crane.set_controls(-1, 0, false)
 	await advance(0.6)
 	check(rad_to_deg(crane.swing_angle()) < limited - 1.0, "The carriage can move inward to relieve side loading")
+	crane.hook.freeze = false
+	await reset_hook(0.0, 8.0, 5.75)
+	crane.hook.freeze = true
+	crane.set_controls(-1, -1, false)
+	await advance(5.0)
+	var diagonal := rad_to_deg(crane.swing_angle())
+	check(diagonal > 27.0 and diagonal <= 30.05 and crane.trolley.position < -0.7 and crane.bridge.position < 7.3,
+		"The 30-degree envelope also applies to combined axes in the opposite quadrant")
 	crane.hook.freeze = false
 	await reset_hook(-1.5, 8.0, 7.97)
 

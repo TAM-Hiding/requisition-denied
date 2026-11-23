@@ -20,7 +20,7 @@ Use the development scrap terminal in the Systems Test Chamber to dispense a **L
 | H | Toggle Strap Mode with the remote disconnected |
 | Look at an object | Show its name, mass confidence, center marker and vertical line |
 | LMB on a load surface | Choose the actual contact point, shown in cyan |
-| E while aiming at the hook | Connect an already selected point after positioning the hook within 0.95 m of it |
+| E while aiming at the hook | Connect an already selected point after positioning the hook within 5.0 m of it |
 | RMB | Clear the selection or release an attached load by aiming at it or the hook |
 | Escape | Leave Strap Mode while preserving a connected load |
 
@@ -37,13 +37,19 @@ A pending point can be selected before using the remote to position the hook. Th
 
 ## Physics and mass properties
 
-The 225 kg block is a Jolt rigid body with simple continuous collision shapes. It can contact Otis, the floor, the deck, rails and equipment. OC-01 pays out a single tension-only suspension. The solver applies one bounded inward impulse when motion would extend the line beyond its paid-out length. A second one-way point constraint models a short strap, using the load's inverse mass and inertia at the chosen point. Load bodies keep their native gravity, collision and mass, and remain independent of the trolley. The strap starts with 3 cm of slack and contacts can unload both constraints. Native damping settles swing and yaw over time.
+The 225 kg block is a Jolt rigid body with simple continuous collision shapes. It can contact Otis, the floor, the deck, rails and equipment. OC-01 pays out a single tension-only suspension. The solver applies one bounded inward impulse when motion would extend the line beyond its paid-out length. A second one-way point constraint models the strap, using the load's inverse mass and inertia at the chosen point. Load bodies keep their native gravity, collision and mass, and remain independent of the trolley. The strap uses the measured connection distance plus up to 3 cm of slack, capped at 5.0 m. Short connections stay short. Contact can unload both constraints. Native damping settles swing and yaw over time.
 
-Normal swing is up to 15°. Resistance ramps in at 20° and outward crane travel is inhibited at the 25° operating limit. Brief transient sway can exceed that target before damping brings it back. Inward travel stays available. Chain-path and side-load limits use the existing obstruction warning and do not incur maintenance damage. At surfaces, motor payout limits free hook slack to 0.50 m. The lower motor limit gives the physical block enough travel to rest on the slab. The 50,000 kg nominal capacity is checked on attachment and when adding material to a suspended movable assembly.
+Normal swing is up to 15°. Resistance ramps in at 25° and outward crane travel is inhibited at the 30° operating limit. Brief transient sway can exceed that target before damping brings it back. Inward travel stays available. Chain-path and side-load limits use the existing obstruction warning and do not incur maintenance damage. At surfaces, motor payout limits free hook slack to 0.50 m. The lower motor limit gives the physical block enough travel to rest on the slab. The 50,000 kg nominal capacity is checked on attachment and when adding material to a suspended movable assembly.
 
 Standalone bodies use authored centers when supplied and volume-weighted collider estimates otherwise. Procedural steel stock uses its modeled cross-section centroid and density. Connected members contribute their local centers and masses to a mass-weighted average in the canonical body's frame. Membership, material, geometry and mass changes invalidate that result, while ordinary motion transforms the cached center. Strap Mode uses **green** for known, **amber** for estimated, and **gray** for insufficient information. Static mill, lathe, table and cabinet placeholders show estimates and remain fixed.
 
 The twin chain falls render a single span over the actual hook position with bounded visual geometry. The physical constraint represents slack without simulating separate links or wraparound. Independently colliding mechanical mount children can contribute to a mass estimate and remain ineligible as one lift. The movable solver root is preserved when joining new movable members to a strapped assembly. Joining a fixed support or losing the selected point can release the strap. The full 50-tonne rating is a gameplay limit. Extreme off-center loads can have more visible constraint compliance than ordinary workshop stock.
+
+## Release and settling
+
+An off-center lift can turn a tube or rod nearly vertical. In the previous draft, detaching restored the rotation lock set on fresh or hand-dropped stock. This held the stock at its suspended angle after gravity brought it to the floor. The same issue reproduced with a Uni-Bolt compound. Ordinary drops from the stock's level pose rested level, and pre-unlocked stock could rotate after a crane release.
+
+To compare the two paths, drop a long square tube or steel rod from its usual level handling pose, then lift the same stock by a point near one end until it leans steeply. Release over the clear hall floor. The load keeps its pose and momentum at release, then responds to floor contact. A balanced tube can legitimately stand on its flat end. A small side impulse distinguishes that equilibrium from a rotation lock. The crane releases movable world stock to free rotation and preserves the original mass settings and fastener connections.
 
 ## In-game captures
 
