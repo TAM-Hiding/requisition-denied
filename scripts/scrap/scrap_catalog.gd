@@ -18,6 +18,12 @@ const STOCK := [
 const WALL := 0.012
 const TUBE_VISUAL_SEGMENTS := 48
 const DENSITY := 7850.0
+const INCH_M := 0.0254
+const W12_50_DEPTH_M := 12.20 * INCH_M
+const W12_50_WIDTH_M := 8.08 * INCH_M
+const W12_50_FLANGE_M := 0.640 * INCH_M
+const W12_50_WEB_M := 0.370 * INCH_M
+const W12_50_AREA_M2 := 14.60 * INCH_M * INCH_M
 
 static func entries() -> Array[Dictionary]:
 	var catalog: Array[Dictionary] = []
@@ -35,7 +41,44 @@ static func entries() -> Array[Dictionary]:
 			entry.mass = snappedf(entry.volume * DENSITY, 0.01)
 			entry.center_of_mass = entry.first_moment / entry.volume
 			catalog.append(entry)
+	catalog.append_array(industrial_entries())
 	return catalog
+
+static func industrial_entries() -> Array[Dictionary]:
+	var flat := industrial_entry("Flat Bar — 20 ft", "▰", Vector3(6.096, 0.0127, 0.1524),
+		"Solid steel flat bar, 6,096 mm long by 152.4 mm wide by 12.7 mm thick.")
+	add_box(flat, flat.size, Vector3.ZERO)
+	var round := industrial_entry("Round Bar — 20 ft", "━", Vector3(6.096, 0.0762, 0.0762),
+		"Solid steel round bar, 6,096 mm long by 76.2 mm diameter.")
+	add_rod(round, 32)
+	var beam := industrial_entry("Wide-Flange Beam — 30 ft", "Ⅰ",
+		Vector3(9.144, W12_50_DEPTH_M, W12_50_WIDTH_M),
+		"W12×50 structural steel, 9,144 mm long with 309.9 mm section depth and 205.2 mm flange width.")
+	var flange_size := Vector3(beam.size.x, W12_50_FLANGE_M, W12_50_WIDTH_M)
+	var flange_offset := Vector3.UP * ((W12_50_DEPTH_M - W12_50_FLANGE_M) * 0.5)
+	add_box(beam, flange_size, flange_offset)
+	add_box(beam, flange_size, -flange_offset)
+	add_box(beam, Vector3(beam.size.x, W12_50_DEPTH_M - 2.0 * W12_50_FLANGE_M, W12_50_WEB_M), Vector3.ZERO)
+	# AISC Shapes Database v16.0 section area includes the small root fillets omitted from collision.
+	beam.volume = W12_50_AREA_M2 * beam.size.x
+
+	var machine := industrial_entry("Machinery Test Block — 5 t", "▣", Vector3(1.5, 0.8, 1.0),
+		"Chamfered machinery test casting, 1,500 mm long by 1,000 mm wide by 800 mm high. Ballasted to 5,000 kg.")
+	var outline := PackedVector2Array([
+		Vector2(-0.75, -0.40), Vector2(-0.65, -0.50), Vector2(0.65, -0.50), Vector2(0.75, -0.40),
+		Vector2(0.75, 0.40), Vector2(0.65, 0.50), Vector2(-0.65, 0.50), Vector2(-0.75, 0.40),
+	])
+	add_prism(machine, outline, machine.size.y)
+	var entries: Array[Dictionary] = [flat, round, beam, machine]
+	for entry in entries:
+		entry.mass = snappedf(entry.volume * DENSITY, 0.01)
+		entry.center_of_mass = entry.first_moment / entry.volume
+	machine.mass = 5000.0
+	return entries
+
+static func industrial_entry(title: String, icon: String, size: Vector3, description: String) -> Dictionary:
+	return {"category": "Industrial test stock", "industrial": true, "title": title, "icon": icon,
+		"size": size, "description": description, "shapes": [], "volume": 0.0, "first_moment": Vector3.ZERO}
 
 static func describe(entry: Dictionary, variant: int) -> void:
 	var size: Vector3 = entry.size
@@ -64,17 +107,7 @@ static func describe(entry: Dictionary, variant: int) -> void:
 				add_prism(entry, outline, size.x,
 					Transform3D(Basis(Vector3(1, 1, 1).normalized(), -TAU / 3.0), Vector3.ZERO), false)
 		"Steel rod":
-			var shape := CylinderShape3D.new()
-			shape.radius = size.y * 0.5
-			shape.height = size.x
-			var mesh := CylinderMesh.new()
-			mesh.top_radius = shape.radius
-			mesh.bottom_radius = shape.radius
-			mesh.height = size.x
-			mesh.radial_segments = 12
-			mesh.rings = 0
-			entry.shapes.append([shape, mesh, Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3.ZERO)])
-			entry.volume = PI * shape.radius * shape.radius * size.x
+			add_rod(entry, 12)
 		"Triangular gusset", "Irregular scrap":
 			var x := size.x * 0.5
 			var z := size.z * 0.5
@@ -84,6 +117,20 @@ static func describe(entry: Dictionary, variant: int) -> void:
 			add_prism(entry, outline, size.y)
 		_:
 			add_box(entry, size, Vector3.ZERO)
+
+static func add_rod(entry: Dictionary, radial_segments: int) -> void:
+	var size: Vector3 = entry.size
+	var shape := CylinderShape3D.new()
+	shape.radius = size.y * 0.5
+	shape.height = size.x
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = shape.radius
+	mesh.bottom_radius = shape.radius
+	mesh.height = size.x
+	mesh.radial_segments = radial_segments
+	mesh.rings = 0
+	entry.shapes.append([shape, mesh, Transform3D(Basis(Vector3.BACK, PI * 0.5), Vector3.ZERO)])
+	entry.volume = PI * shape.radius * shape.radius * size.x
 
 static func add_box(entry: Dictionary, size: Vector3, at: Vector3) -> void:
 	var shape := BoxShape3D.new()

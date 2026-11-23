@@ -42,7 +42,7 @@ func _ready() -> void:
 	feedback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	right.add_child(feedback)
 	var exit_hint := Label.new()
-	exit_hint.text = "ESC EXIT   /   DELIVERY PAD BESIDE RACK"
+	exit_hint.text = "ESC EXIT"
 	column.add_child(exit_hint)
 	for entry in supply.catalog:
 		stock.add_item("%s  %s" % [entry.icon, entry.title])
@@ -60,10 +60,14 @@ func _draw() -> void:
 func select_stock(index: int) -> void:
 	selected = index
 	var entry := supply.catalog[index]
-	detail.text = "%s\n\n%s\n\n%s\n%.2f kg" % [
-		entry.icon, String(entry.category).to_upper(), ScrapSupply.dimensions(entry.size), entry.mass]
+	detail.text = "%s\n\n%s\n\n%s\n%.2f kg\n\nDELIVERY / %s" % [
+		entry.icon, String(entry.category).to_upper(), ScrapSupply.dimensions(entry.size), entry.mass,
+		"ENGINEERING TEST HALL" if entry.get("industrial", false) else "PAD BESIDE RACK"]
 	feedback.text = ""
 
 func dispense_selected() -> void:
 	var part := supply.dispense(selected)
-	feedback.text = "Dispensed %s." % part.definition.display_name if part != null else "REQUISITION DENIED — DELIVERY AREA OBSTRUCTED"
+	feedback.text = "REQUISITION DENIED — DELIVERY AREA OBSTRUCTED"
+	if part != null:
+		var suffix := " to the Engineering Test Hall" if supply.catalog[selected].get("industrial", false) else ""
+		feedback.text = "Dispensed %s%s." % [part.definition.display_name, suffix]
