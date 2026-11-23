@@ -623,14 +623,16 @@ func build_scrap_rack(dark: Material, amber: Material, steel: Material) -> void:
 	scrap_supply = ScrapSupply.new()
 	scrap_supply.name = "ScrapSupply"
 	scrap_supply.finish = steel
+	scrap_supply.industrial_delivery_hall = $EngineeringTestHall
 	add_child(scrap_supply)
+	mark_industrial_delivery_pad(amber)
 	var rack := InteractableObject.new()
 	rack.name = "DevelopmentScrapRack"
 	rack.position = Vector3(-4.80, 1.22, 5.76)
 	rack.rotation.y = PI
 	rack.definition = part_definition(&"RD-SCRAP-RACK", "Development scrap rack", 80.0)
 	rack.definition.mobility = ObjectDefinition.Mobility.FIXED
-	rack.definition.description = "Unlimited rigid steel test stock. Collect deliveries from the marked floor pad."
+	rack.definition.description = "Development stock. Standard pieces arrive beside the rack. Industrial pieces arrive at the marked Engineering Test Hall pad."
 	rack.definition.available_actions.assign([&"inspect", &"use_terminal"])
 	rack.set_meta(&"no_fasteners", true)
 	add_child(rack)
@@ -667,3 +669,21 @@ func build_scrap_rack(dark: Material, amber: Material, steel: Material) -> void:
 	scrap_session.configure_scrap($Otis, rack, scrap_supply, screen, anchor, display)
 	scrap_session.active_changed.connect($InteractionUI.set_terminal_active)
 	terminal_session.screen_ui.settings_panel.scrap_supply = scrap_supply
+
+
+func mark_industrial_delivery_pad(amber: Material) -> void:
+	var hall: Node3D = $EngineeringTestHall
+	var pad := Node3D.new()
+	pad.name = "IndustrialDeliveryPad"
+	pad.position = ScrapSupply.INDUSTRIAL_PAD
+	hall.add_child(pad)
+	var half_width := ScrapSupply.INDUSTRIAL_PAD_WIDTH * 0.5
+	var half_depth := ScrapSupply.INDUSTRIAL_PAD_DEPTH * 0.5
+	for x: float in [-half_width, half_width]:
+		for z: float in [-half_depth, half_depth]:
+			box(pad, "LengthMark", Vector3(0.54, 0.003, 0.035),
+				Vector3(x - signf(x) * 0.27, 0.008, z), amber)
+			box(pad, "EndMark", Vector3(0.035, 0.003, 0.32),
+				Vector3(x, 0.008, z - signf(z) * 0.16), amber)
+	label_at(pad, "INDUSTRIAL DELIVERY", Vector3(0, 0.014, -0.8), 20, Color("b59b65"))
+	(pad.get_child(pad.get_child_count() - 1) as Label3D).rotation.x = -PI / 2.0

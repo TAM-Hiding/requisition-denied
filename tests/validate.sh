@@ -48,4 +48,6 @@ run_check --headless --path . --script tests/validate_crane_remote.gd
 run_check --headless --fixed-fps 60 --path . --script tests/validate_crane_rigging.gd
 run_check --headless --path . --script tests/validate_lift_mass_properties.gd
 run_check --headless --fixed-fps 60 --path . --script tests/validate_strap_mode.gd
+run_check --headless --fixed-fps 60 --path . --script tests/validate_industrial_stock.gd
+run_check --headless --fixed-fps 60 --path . --script tests/validate_industrial_lifts.gd
 run_check --headless --path . --quit-after 120

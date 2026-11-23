@@ -29,11 +29,14 @@ func run() -> void:
 	var rack_session: TerminalInteraction = facility.scrap_session
 	var ui = facility.get_node("InteractionUI")
 	await frames(4)
-	check(supply.catalog.size() == 27, "27 authored stock variants")
+	var original_stock := supply.catalog.filter(func(entry: Dictionary) -> bool:
+		return not entry.get("industrial", false))
+	check(original_stock.size() == 27 and supply.catalog.slice(0, original_stock.size()) == original_stock,
+		"27 original stock variants retain their registration and order")
 	for obsolete in ["SteelPlate", "AngleBracket", "LongAngle", "SteelBar", "TriangularGusset"]:
 		check(facility.get_node_or_null(obsolete) == null, "Obsolete chamber fixture removed: " + obsolete)
 	var all_ids := {}
-	for index in supply.catalog.size():
+	for index in original_stock.size():
 		var data := supply.catalog[index]
 		var part := supply.dispense(index)
 		check(part != null and data.mass > 0.0 and data.size.is_finite(), "Dispense valid " + data.title)
