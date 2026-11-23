@@ -208,11 +208,14 @@ func tick(delta: float) -> void:
 		actor.velocity.y = 0
 	# CharacterBody3D handles collision and sliding before the contacted bodies
 	# receive any impulse. Idle, airborne and dedicated manipulation cannot push.
-	var approach := actor.velocity
+	var approach := direction * current_speed
+	var platform_velocity := actor.get_platform_velocity() if actor.is_on_floor() else Vector3.ZERO
 	var can_push := enabled and not axis.is_zero_approx() and not interaction_restricted()
 	actor.move_and_slide()
-	if can_push and actor.is_on_floor():
-		ContactPush.apply(actor, approach, delta)
+	if actor.is_on_floor():
+		ContactPush.apply_weight(actor)
+		if can_push:
+			ContactPush.apply(actor, approach, delta, platform_velocity)
 	local_motion = actor.global_basis.inverse() * Vector3(actor.velocity.x, 0, actor.velocity.z)
 	update_camera(delta)
 

@@ -277,7 +277,7 @@ func restore_world(item: InteractableObject, pose: Transform3D, precision: bool)
 	item.state = InteractableObject.State.WORLD
 	item.equipment_owner = null
 	item.collision_layer = 1
-	item.collision_mask = 3
+	item.collision_mask = InteractableObject.WORLD_COLLISION_MASK
 	item.lock_rotation = not precision
 	item.freeze = false
 	item.sleeping = false

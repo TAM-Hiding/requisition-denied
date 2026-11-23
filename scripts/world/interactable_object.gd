@@ -2,6 +2,9 @@ class_name InteractableObject
 extends RigidBody3D
 ## Runtime body. Definitions describe the object; state belongs to this instance.
 enum State { WORLD, HELD, STOWED, MOVING, CARRIED }
+# Otis sweeps against world bodies and supplies his weight and deliberate pushes.
+# Do not also let the rigid solver treat his kinematic collider as infinite mass.
+const WORLD_COLLISION_MASK := 1
 @export var definition: ObjectDefinition
 var state: State = State.WORLD
 var storage_owner: InventoryContainer
@@ -22,7 +25,7 @@ func _ready() -> void:
 	continuous_cd = true
 	linear_damp = 1.5
 	collision_layer = 1
-	collision_mask = 3
+	collision_mask = WORLD_COLLISION_MASK
 	freeze = mobility() == ObjectDefinition.Mobility.FIXED
 
 func mobility() -> int:

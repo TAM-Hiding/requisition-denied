@@ -50,4 +50,6 @@ run_check --headless --path . --script tests/validate_lift_mass_properties.gd
 run_check --headless --fixed-fps 60 --path . --script tests/validate_strap_mode.gd
 run_check --headless --fixed-fps 60 --path . --script tests/validate_industrial_stock.gd
 run_check --headless --fixed-fps 60 --path . --script tests/validate_industrial_lifts.gd
+run_check --headless --fixed-fps 60 --path . --script tests/validate_moving_platforms.gd
+run_check --headless --fixed-fps 60 --path . --script tests/validate_beam_response.gd
 run_check --headless --path . --quit-after 120
