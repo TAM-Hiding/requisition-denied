@@ -41,6 +41,8 @@ func result(ok: bool, message: String) -> Dictionary:
 	return {"ok": ok, "message": message}
 
 func pick_up(item: InteractableObject) -> Dictionary:
+	if is_instance_valid(item) and item.has_meta(CraneRigging.ATTACHED_META):
+		return result(false, "Release the crane strap before taking the load.")
 	if dumping:
 		return result(false, "Finish emptying the satchel first.")
 	if not is_instance_valid(item) or item.fastened or item.mobility() != ObjectDefinition.Mobility.CARRYABLE or item.state != InteractableObject.State.WORLD or item.storage_owner != null or item.equipment_owner != null:
@@ -75,6 +77,8 @@ func equipped_mass_kg() -> float:
 	return _held.mass if is_instance_valid(_held) else 0.0
 
 func store_world(item: InteractableObject) -> Dictionary:
+	if is_instance_valid(item) and item.has_meta(CraneRigging.ATTACHED_META):
+		return result(false, "Release the crane strap before taking the load.")
 	if dumping:
 		return result(false, "Finish emptying the satchel first.")
 	if actor.placement.is_active():

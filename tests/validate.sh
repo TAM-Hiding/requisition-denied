@@ -42,7 +42,10 @@ run_check --headless --path . --script tests/validate_layout_editor.gd
 run_check --headless --path . --script tests/validate_layout_editor.gd -- --workshop-layout
 run_check --headless --path . --script tests/validate_storage_cells.gd
 run_check --headless --path . --script tests/validate_approved_hall_layout.gd
-run_check --headless --path . --script tests/validate_bridge_crane.gd
+run_check --headless --fixed-fps 60 --path . --script tests/validate_bridge_crane.gd
 run_check --headless --path . --script tests/validate_crane_service.gd
 run_check --headless --path . --script tests/validate_crane_remote.gd
+run_check --headless --fixed-fps 60 --path . --script tests/validate_crane_rigging.gd
+run_check --headless --path . --script tests/validate_lift_mass_properties.gd
+run_check --headless --fixed-fps 60 --path . --script tests/validate_strap_mode.gd
 run_check --headless --path . --quit-after 120
